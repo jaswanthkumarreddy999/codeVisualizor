@@ -1,0 +1,283 @@
+'use client';
+
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { BarChart2, StretchHorizontal } from 'lucide-react';
+
+interface ArrayVisualizerProps {
+    heap: Record<string, any>;
+    variableName: string;
+    visualizedVariables?: string[];
+    ignoredPointers?: string[];
+    onToggleIgnoredPointer: (variableName: string, pointer: string) => void;
+    viewMode: 'bar' | 'box';
+    onViewModeChange: (mode: 'bar' | 'box') => void;
+    activePointers?: string[];
+    onAddPointer?: (name: string) => void;
+    onRemovePointer?: (name: string) => void;
+}
+
+export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
+    heap,
+    variableName,
+    visualizedVariables = [],
+    ignoredPointers = [],
+    onToggleIgnoredPointer,
+    viewMode,
+    onViewModeChange,
+    activePointers = [],
+    onAddPointer,
+    onRemovePointer
+}) => {
+    // 1. Identify arrays in the heap
+    const arrayName = variableName;
+    const data = heap[arrayName] || [];
+
+    // 2. Explicit Pointers Logic
+    // Only use pointers explicitly present in activePointers list
+    const pointers = activePointers
+        .map(name => ({ name, value: heap[name] }))
+        .filter(p => typeof p.value === 'number');
+
+    const maxVal = Math.max(...(data.length > 0 ? data.map(Number) : [1]), 1);
+
+    // 3. Find secondary data (water/stack)
+    const secondaryEntry = Object.entries(heap).find(([key, val]) =>
+        (key === 'water' || key === 'waterLevels' || key === 'water_levels' || key === 'stack' || key.includes('secondary')) &&
+        Array.isArray(val) &&
+        key !== variableName &&
+        val.length === data.length
+    );
+    const secondaryData = secondaryEntry ? secondaryEntry[1] : [];
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const varName = e.dataTransfer.getData('application/react-dnd-var');
+        if (varName && onAddPointer) {
+            onAddPointer(varName);
+        }
+    };
+
+    return (
+        <div
+            className="relative w-full h-full overflow-hidden p-8 flex flex-col items-center justify-between"
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
+            {/* Header */}
+            <div className="w-full flex justify-between items-center border-b border-theme pb-4 mb-4 shrink-0">
+                <div className="text-theme-secondary text-xs font-mono uppercase tracking-[0.2em]">
+                    Array Visualizer <span className="text-theme-tertiary">|</span> <span className="text-accent font-bold">{arrayName}</span>
+                </div>
+
+                {/* View Toggle */}
+                <div className="flex bg-theme-tertiary rounded-lg p-1 gap-1">
+                    <button
+                        onClick={() => onViewModeChange('bar')}
+                        className={`p-1.5 rounded-md transition-all ${viewMode === 'bar' ? 'bg-theme-secondary text-accent shadow-sm' : 'text-theme-secondary hover:text-theme-primary'}`}
+                        title="Bar Graph View"
+                    >
+                        <BarChart2 size={16} />
+                    </button>
+                    <button
+                        onClick={() => onViewModeChange('box')}
+                        className={`p-1.5 rounded-md transition-all ${viewMode === 'box' ? 'bg-theme-secondary text-accent shadow-sm' : 'text-theme-secondary hover:text-theme-primary'}`}
+                        title="Box View"
+                    >
+                        <StretchHorizontal size={16} />
+                    </button>
+                </div>
+            </div>
+
+            {/* Visualization Area */}
+            {viewMode === 'bar' ? (
+                /* Bar Chart Area - Flexible Height */
+                <div className="flex-grow w-full flex items-end justify-center gap-1 pb-12 px-8 relative">
+                    <AnimatePresence mode="popLayout">
+                        {data.map((rawVal: any, idx: number) => {
+                            const val = Number(rawVal);
+                            const isActive = pointers.some(p => p.value === idx);
+
+                            // Calculate heights
+                            const heightPct = Math.max((val / maxVal) * 100, 2);
+                            const waterHeightPct = secondaryData && secondaryData[idx] ? (secondaryData[idx] / maxVal) * 100 : 0;
+
+                            return (
+                                <div key={idx} className="h-full flex-grow flex flex-col justify-end items-center group relative min-w-[20px] max-w-[60px]">
+                                    {/* Total Stack Container */}
+                                    <div className="w-full relative flex flex-col justify-end" style={{ height: `${heightPct + waterHeightPct}%`, transition: 'height 0.3s ease' }}>
+
+                                        {/* Water/Stack Segment (Top) */}
+                                        {waterHeightPct > 0 && (
+                                            <motion.div
+                                                initial={{ height: 0, opacity: 0 }}
+                                                animate={{ height: `${(waterHeightPct / (heightPct + waterHeightPct)) * 100}%`, opacity: 1 }}
+                                                className="w-full bg-cyan-500/80 backdrop-blur-sm border-t border-cyan-400/50 relative"
+                                                style={{ borderTopLeftRadius: 4, borderTopRightRadius: 4 }}
+                                            >
+                                                <div className="absolute inset-0 bg-gradient-to-b from-cyan-400/20 to-transparent" />
+                                                {/* Water Label */}
+                                                <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] font-bold text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    +{secondaryData[idx]}
+                                                </div>
+                                            </motion.div>
+                                        )}
+
+                                        {/* Primary Value Segment (Bottom) */}
+                                        <motion.div
+                                            initial={{ height: 0 }}
+                                            animate={{ height: `${(heightPct / (heightPct + waterHeightPct)) * 100}%` }}
+                                            className={`w-full relative overflow-hidden transition-all duration-300 ${isActive
+                                                ? 'bg-gradient-to-t from-indigo-600 to-violet-500 shadow-[0_0_30px_rgba(139,92,246,0.3)]'
+                                                : 'bg-gradient-to-t from-slate-800 to-slate-700'
+                                                }`}
+                                            style={{
+                                                borderRadius: waterHeightPct > 0 ? '0 0 4px 4px' : '4px 4px 0 0',
+                                                opacity: isActive ? 1 : 0.8
+                                            }}
+                                        >
+                                            {/* Value Label - Condition to show inside or above */}
+                                            {heightPct > 15 ? (
+                                                <div className={`absolute top-2 left-1/2 -translate-x-1/2 text-xs font-bold ${isActive ? 'text-white' : 'text-theme-primary'} z-20`}>
+                                                    {val}
+                                                </div>
+                                            ) : null}
+                                        </motion.div>
+
+                                        {/* Label Above Bar (for small values) */}
+                                        {heightPct <= 15 && (
+                                            <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-bold text-theme-primary z-20">
+                                                {val}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Index Label */}
+                                    <div className="mt-3 text-[10px] font-mono text-theme-secondary group-hover:text-theme-primary transition-colors">
+                                        {idx}
+                                    </div>
+
+                                    {/* Pointer Labels */}
+                                    <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 w-max z-10">
+                                        <div className="flex flex-col gap-1 items-center">
+                                            {pointers.filter(p => p.value === idx).map(p => (
+                                                <motion.div
+                                                    key={p.name}
+                                                    initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                    className="px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap bg-accent cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1"
+                                                    style={{ boxShadow: '0 4px 6px -1px var(--accent-light)' }}
+                                                    onClick={(e) => { e.stopPropagation(); }}
+                                                    onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
+                                                    title="Double click to remove pointer"
+                                                >
+                                                    {p.name}
+                                                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[4px]" style={{ borderBottomColor: 'var(--accent)' }} />
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </AnimatePresence>
+                </div>
+            ) : (
+                /* Box View Area */
+                <div className="flex-grow w-full flex items-center justify-center gap-2 pb-12 px-8 relative overflow-x-auto">
+                    <AnimatePresence mode="popLayout">
+                        {data.map((rawVal: any, idx: number) => {
+                            const val = Number(rawVal);
+                            const isActive = pointers.some(p => p.value === idx);
+
+                            return (
+                                <motion.div
+                                    key={idx}
+                                    initial={{ scale: 0.8, opacity: 0 }}
+                                    animate={{ scale: 1, opacity: 1 }}
+                                    exit={{ scale: 0.8, opacity: 0 }}
+                                    className="flex flex-col items-center relative group min-w-[50px]"
+                                >
+                                    {/* Pointer Labels (Top) */}
+                                    {pointers.filter(p => p.value === idx).length > 0 && (
+                                        <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 w-max z-10">
+                                            {pointers.filter(p => p.value === idx).map(p => (
+                                                <motion.div
+                                                    key={p.name}
+                                                    initial={{ opacity: 0, y: 10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    className="px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap bg-accent cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1"
+                                                    onClick={(e) => { e.stopPropagation(); }}
+                                                    onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
+                                                    title="Double click to remove pointer"
+                                                >
+                                                    {p.name}
+                                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px]" style={{ borderTopColor: 'var(--accent)' }} />
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Box */}
+                                    <div
+                                        className={`w-12 h-12 flex items-center justify-center rounded-lg border-2 font-bold text-sm transition-all duration-300 relative ${isActive
+                                            ? 'border-accent bg-accent/10 text-accent shadow-[0_0_20px_var(--accent-light)] scale-110'
+                                            : 'border-theme-primary/20 bg-theme-tertiary/30 text-theme-primary group-hover:border-theme-primary/50'
+                                            }`}
+                                    >
+                                        {val}
+                                        {secondaryData[idx] > 0 && (
+                                            <div className="absolute -top-2 -right-2 bg-cyan-500 text-white text-[9px] w-5 h-5 rounded-full flex items-center justify-center font-bold shadow-sm">
+                                                +{secondaryData[idx]}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Index */}
+                                    <div className="mt-2 text-[10px] font-mono text-theme-secondary group-hover:text-theme-primary transition-colors">
+                                        {idx}
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
+                    </AnimatePresence>
+                </div>
+            )}
+
+            {data.length === 0 && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="text-theme-secondary font-mono text-sm border-2 border-dashed border-theme rounded-xl p-8 w-64 text-center">
+                        No active array data found.
+                    </div>
+                </div>
+            )}
+
+            {/* Global Variables Overlay (Floating) */}
+            {(pointers.filter(p => !data[p.value]).length > 0 || Object.keys(heap).some(k => ['water', 'max', 'sum'].includes(k))) && (
+                <div className="absolute top-20 right-8 bg-theme-secondary/80 backdrop-blur-md border border-theme rounded-xl p-4 flex flex-col gap-3 shadow-xl">
+                    <span className="text-[9px] uppercase tracking-widest text-theme-secondary font-bold border-b border-theme pb-1 mb-1">Globals</span>
+                    {Object.entries(heap)
+                        .filter(([key, val]) =>
+                            typeof val === 'number' &&
+                            (key === 'water' || key === 'leftMax' || key === 'rightMax' || key === 'trapped') &&
+                            !visualizedVariables.includes(key)
+                        )
+                        .map(([key, val]) => (
+                            <div key={key} className="flex justify-between items-center gap-6">
+                                <span className="text-xs text-theme-secondary font-mono">{key}</span>
+                                <span className="text-sm font-bold text-accent font-mono">{String(val)}</span>
+                            </div>
+                        ))
+                    }
+                </div>
+            )}
+        </div>
+    );
+};

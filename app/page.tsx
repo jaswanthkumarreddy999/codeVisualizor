@@ -1,0 +1,679 @@
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { CodeEditor } from '@/components/CodeEditor';
+import { UnifiedVisualizer } from '@/components/UnifiedVisualizer';
+import { Timeline } from '@/components/Timeline';
+import { WatchWindow } from '@/components/WatchWindow';
+import { instrument } from '@/lib/engine/instrumenter';
+import { ExecutionEngine, StateSnapshot } from '@/lib/engine/state-machine';
+import { ProjectManager, SavedProject } from '@/components/ProjectManager';
+import { Play, Zap, FileCode, Cpu, ChevronDown } from 'lucide-react';
+
+const DEFAULT_TS_CODE = `// Trapping Rain Water (Visualized)
+let height = [4, 2, 0, 3, 2, 5];
+let n = height.length;
+let leftMax = 0, rightMax = 0;
+let waterLevels = new Array(n).fill(0); // For visualization
+
+let i = 0, j = n - 1;
+
+while (i <= j) {
+    if (height[i] < height[j]) {
+        if (height[i] >= leftMax) {
+            leftMax = height[i];
+        } else {
+            waterLevels[i] = leftMax - height[i]; // Store trapped water
+        }
+        i++;
+    } else {
+        if (height[j] >= rightMax) {
+            rightMax = height[j];
+        } else {
+            waterLevels[j] = rightMax - height[j]; // Store trapped water
+        }
+        j--;
+    }
+}
+`;
+
+const DEFAULT_PYTHON_CODE = `# Trapping Rain Water (Visualized)
+height = [4, 2, 0, 3, 2, 5]
+n = len(height)
+left_max = 0
+right_max = 0
+water_levels = [0] * n # For visualization
+
+i = 0
+j = n - 1
+
+while i <= j:
+    if height[i] < height[j]:
+        if height[i] >= left_max:
+            left_max = height[i]
+        else:
+            water_levels[i] = left_max - height[i] # Store trapped water
+        i += 1
+    else:
+        if height[j] >= right_max:
+            right_max = height[j]
+        else:
+            water_levels[j] = right_max - height[j] # Store trapped water
+        j -= 1
+`;
+
+const DEFAULT_JAVA_CODE = `public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello from Java!");
+    }
+}
+`;
+
+const DEFAULT_C_CODE = `#include <stdio.h>
+
+int main() {
+    int count = 5;
+    printf("Starting C program\\n");
+    for (int i = 0; i < count; i++) {
+        printf("Count: %d\\n", i);
+    }
+    return 0;
+}
+`;
+
+const DEFAULT_CPP_CODE = `#include <iostream>
+#include <vector>
+
+int main() {
+    std::cout << "Hello from C++!" << std::endl;
+    int a = 10;
+    int b = 20;
+    std::cout << "Sum: " << (a + b) << std::endl;
+    return 0;
+}
+`;
+
+// Helper to hydrate Backend (Python/Java) history to JS StateSnapshot
+function hydrateBackendHistory(history: any[]): StateSnapshot[] {
+  return history.map(step => {
+    const { roots, store, line } = step;
+    const heap: Record<string, any> = {};
+    const cache = new Map<string, any>();
+
+    const resolve = (val: any): any => {
+      if (!val) return val;
+      if (typeof val === 'object' && val.__viz_ref) {
+        const id = val.__viz_ref;
+        if (cache.has(id)) return cache.get(id);
+
+        const rawObj = store[id];
+        if (!rawObj) return null;
+
+        const isArray = rawObj.type === 'array';
+        const obj: any = isArray ? [] : {};
+
+        // Establish identity first
+        // Use Object.defineProperty to make these properties non-enumerable if desired,
+        // but usually fine to be enumerable but filtered by visualizer (check UnifiedVisualizer)
+        // UnifiedVisualizer checks __viz_type.
+        Object.defineProperty(obj, '__viz_id', { value: rawObj.__viz_id, writable: true, enumerable: false });
+
+        if (rawObj.__viz_type || isArray) {
+          Object.defineProperty(obj, '__viz_type', { value: rawObj.__viz_type || 'object', writable: true, enumerable: false });
+        }
+
+        cache.set(id, obj);
+
+        // Populate
+        if (isArray) {
+          (rawObj.value as any[]).forEach((item: any) => {
+            obj.push(resolve(item));
+          });
+        } else {
+          const source = rawObj.type === 'object' ? rawObj.value : rawObj;
+
+          for (const k in source) {
+            if (k.startsWith('__viz')) continue;
+            // Ignore metadata keys if they exist in source
+            if (k === 'type' && !source.type && rawObj.type === 'object') continue;
+
+            obj[k] = resolve(source[k]);
+          }
+        }
+        return obj;
+      }
+      return val;
+    };
+
+    for (const [key, val] of Object.entries(roots)) {
+      heap[key] = resolve(val);
+    }
+
+    return {
+      heap,
+      stack: {},
+      line,
+      description: `Line ${line}`
+    };
+  });
+}
+
+export default function Home() {
+  const [language, setLanguage] = useState<'typescript' | 'python' | 'java' | 'c' | 'cpp'>('typescript');
+  const [code, setCode] = useState(DEFAULT_TS_CODE);
+  const [history, setHistory] = useState<StateSnapshot[]>([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [isCompiling, setIsCompiling] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [visualizedVariables, setVisualizedVariables] = useState<string[]>([]);
+  const [ignoredPointers, setIgnoredPointers] = useState<Record<string, string[]>>({});
+  const [playbackSpeed, setPlaybackSpeed] = useState(500);
+
+  // IO State
+  const [inputVal, setInputVal] = useState('');
+  const [outputVal, setOutputVal] = useState('');
+
+  // ... (Keep existing Layout State)
+  const [editorWidth, setEditorWidth] = useState(33.33); // Percentage
+  const [watchWindowWidth, setWatchWindowWidth] = useState(320); // Pixels
+
+  // New Resizable States
+  const [codeEditorHeight, setCodeEditorHeight] = useState(50); // Percentage of Left Column
+  const [inputWidth, setInputWidth] = useState(50); // Percentage of IO Panel
+
+  const [isResizingEditor, setIsResizingEditor] = useState(false);
+  const [isResizingWatch, setIsResizingWatch] = useState(false);
+  const [isResizingCodeEditorHeight, setIsResizingCodeEditorHeight] = useState(false);
+  const [isResizingInputWidth, setIsResizingInputWidth] = useState(false);
+
+  // Theme State
+  const [themeMode, setThemeMode] = useState<'dark' | 'light' | 'codenow'>('codenow');
+  const [accentColor, setAccentColor] = useState('blue'); // blue, green, red, yellow
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  const engine = useMemo(() => new ExecutionEngine(), []);
+
+  // Initialize Theme from LocalStorage
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('visualizer-theme');
+    const savedAccent = localStorage.getItem('visualizer-accent');
+
+    if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'codenow') {
+      setThemeMode(savedTheme);
+    }
+    if (savedAccent) setAccentColor(savedAccent);
+  }, []);
+
+  // Apply Theme to HTML tag (safer for globals)
+  useEffect(() => {
+    const root = document.documentElement;
+
+    // Reset classes
+    root.classList.remove('light-mode', 'theme-codenow');
+
+    // Apply Theme Class
+    if (themeMode === 'light') {
+      root.classList.add('light-mode');
+    } else if (themeMode === 'codenow') {
+      root.classList.add('theme-codenow');
+      // Force settings or just trust CSS overrides?
+      // CSS overrides accent, but let's keep react state separate or synced?
+      // For now, let CSS override accent variables.
+    }
+
+    // Update Accent Color (only matters for standard themes, CodeNow overrides specific vars)
+    // Remove existing accent classes
+    ['accent-blue', 'accent-green', 'accent-red', 'accent-yellow'].forEach(c => {
+      root.classList.remove(c);
+    });
+    // Add new accent class, unless valid for codenow? 
+    // CodeNow CSS has !important on accent, so this clashing is fine.
+    root.classList.add(`accent-${accentColor}`);
+
+    // Save preferences
+    localStorage.setItem('visualizer-theme', themeMode);
+    localStorage.setItem('visualizer-accent', accentColor);
+  }, [themeMode, accentColor]);
+
+  // Update CodeEditor isDarkMode prop based on theme
+  const isEditorDark = themeMode === 'dark';
+
+  const handleLanguageChange = (newLang: 'typescript' | 'python' | 'java' | 'c' | 'cpp') => {
+    if (newLang === language) return;
+    setLanguage(newLang);
+
+    // Reset code to default if it looks like the user hasn't edited much, or just force for now.
+    // Better: ask confirmation? No, simple switch uses default for that language.
+    if (newLang === 'typescript') {
+      setCode(DEFAULT_TS_CODE);
+    } else if (newLang === 'python') {
+      setCode(DEFAULT_PYTHON_CODE);
+    } else if (newLang === 'java') {
+      setCode(DEFAULT_JAVA_CODE);
+    } else if (newLang === 'c') {
+      setCode(DEFAULT_C_CODE);
+    } else if (newLang === 'cpp') {
+      setCode(DEFAULT_CPP_CODE);
+    }
+    setHistory([]);
+    setCurrentStepIndex(0);
+  };
+
+  const handleLoadProject = (project: SavedProject) => {
+    setCode(project.code);
+    if (project.language) {
+      setLanguage(project.language);
+    } else {
+      // Fallback for old projects
+      setLanguage('typescript');
+    }
+    setVisualizedVariables(project.visualizedVariables);
+    setIgnoredPointers(project.ignoredPointers);
+    setHistory([]);
+    setCurrentStepIndex(0);
+  };
+
+  // History Playback
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isPlaying) {
+      interval = setInterval(() => {
+        setCurrentStepIndex(prev => {
+          if (prev < history.length - 1) {
+            return prev + 1;
+          } else {
+            setIsPlaying(false);
+            return prev;
+          }
+        });
+      }, playbackSpeed);
+    }
+    return () => clearInterval(interval);
+  }, [isPlaying, history.length, playbackSpeed]);
+
+  // In handleRun, we will need to update to pass input
+  const handleRun = async () => {
+    setIsCompiling(true);
+    setIsPlaying(false);
+    setOutputVal(''); // Clear output on run
+
+    try {
+      if (language === 'typescript') {
+        const instrumented = instrument(code);
+        const { history, stdout } = engine.run(instrumented, inputVal);
+        setHistory(history);
+        if (stdout) setOutputVal(stdout);
+      } else if (language === 'python') {
+        // Python Execution
+        const res = await fetch('/api/run-python', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, input: inputVal }) // Pass input
+        });
+        const data = await res.json();
+
+        if (data.stderr) {
+          // If there's stderr but also history, we might want to show it?
+          // Or if error only.
+          console.log("Stderr:", data.stderr);
+        }
+
+        if (data.error) {
+          console.error(data.error);
+          setOutputVal(`Error: ${data.error}\n${data.stderr || ''}`);
+          // Don't return, maybe there is partial history?
+          if (!data.history) return;
+        }
+
+        // Output
+        if (data.stdout) {
+          setOutputVal(data.stdout);
+        }
+
+        if (data.history) {
+          const executionHistory = hydrateBackendHistory(data.history || data); // Handle both formats if I change API
+          setHistory(executionHistory);
+        }
+      } else {
+        // Java, C, C++ Execution
+        const endpoint = language === 'java' ? '/api/run-java'
+          : language === 'c' ? '/api/run-c'
+            : '/api/run-cpp';
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, input: inputVal })
+        });
+        const data = await res.json();
+        if (data.error) {
+          setOutputVal(`Error: ${data.error}\n${data.stderr || ''}`);
+        } else {
+          setOutputVal(data.stdout || '');
+          if (data.stderr) {
+            setOutputVal(prev => prev + '\nStderr:\n' + data.stderr);
+          }
+
+          if (data.history && (language === 'java' || language === 'c' || language === 'cpp')) {
+            const executionHistory = hydrateBackendHistory(data.history);
+            setHistory(executionHistory);
+          } else {
+            setHistory([]);
+          }
+        }
+      }
+      setCurrentStepIndex(0);
+    } catch (err: any) {
+      console.error('Compilation/Runtime error:', err);
+      setOutputVal(prev => prev + '\nError: ' + err.message);
+    } finally {
+      setIsCompiling(false);
+    }
+  };
+
+  // Initial Run
+  useEffect(() => {
+    if (language === 'typescript' && code === DEFAULT_TS_CODE) {
+      const instrumented = instrument(code);
+      const { history } = engine.run(instrumented);
+      setHistory(history);
+    }
+  }, []);
+
+  // Resizing Logic
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizingEditor) {
+        const newWidth = (e.clientX / window.innerWidth) * 100;
+        if (newWidth > 15 && newWidth < 70) setEditorWidth(newWidth);
+      }
+      if (isResizingWatch) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 200 && newWidth < 600) setWatchWindowWidth(newWidth);
+      }
+      if (isResizingCodeEditorHeight) {
+        // Calculate height percentage relative to window height (minus navbar and timeline)
+        // Approximation: Main content area height is ~ screen height - 56px (navbar) - ~64px (timeline)
+        // But we can just use percentage of the parent container if we ref it, or just use window height as proxy
+        // since the parent is "h-screen" minus navbar.
+        // Let's rely on window height for simplicity but offset by navbar
+        const navbarHeight = 56;
+        const availableHeight = window.innerHeight - navbarHeight;
+        const newHeight = ((e.clientY - navbarHeight) / availableHeight) * 100;
+        if (newHeight > 20 && newHeight < 80) setCodeEditorHeight(newHeight);
+      }
+      if (isResizingInputWidth) {
+        // This one is relative to the editor width
+        // We know the editor width percentage.
+        const editorPixelWidth = (window.innerWidth * editorWidth) / 100;
+        const newWidth = (e.clientX / editorPixelWidth) * 100;
+        if (newWidth > 20 && newWidth < 80) setInputWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingEditor(false);
+      setIsResizingWatch(false);
+      setIsResizingCodeEditorHeight(false);
+      setIsResizingInputWidth(false);
+      document.body.style.cursor = 'default';
+    };
+
+    if (isResizingEditor || isResizingWatch || isResizingCodeEditorHeight || isResizingInputWidth) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+
+      if (isResizingCodeEditorHeight) document.body.style.cursor = 'row-resize';
+      else if (isResizingInputWidth || isResizingEditor || isResizingWatch) document.body.style.cursor = 'col-resize';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingEditor, isResizingWatch, isResizingCodeEditorHeight, isResizingInputWidth, editorWidth]);
+
+  const currentSnapshot = history[currentStepIndex] || { heap: {}, stack: {}, line: 0, description: 'Initialization' };
+
+  return (
+    <main className="flex flex-col h-screen overflow-hidden bg-theme-main text-theme-primary transition-colors duration-300">
+      {/* Navbar */}
+      <nav className="h-14 border-b border-theme flex items-center justify-between px-6 bg-theme-secondary/80 backdrop-blur-xl z-20">
+        <div className="flex items-center gap-3">
+          {/* ... Logo ... */}
+          <div className="w-8 h-8 rounded-lg bg-accent flex items-center justify-center shadow-lg shadow-indigo-500/20">
+            <Zap size={18} className="text-white" fill="white" />
+          </div>
+          <h1 className="text-lg font-bold tracking-tight hidden md:block">
+            My <span className="text-accent">Visualizer</span>
+          </h1>
+
+          {/* Removed Language Selector from here */}
+
+          <div className="ml-2 hidden md:flex items-center gap-2 px-3 py-1 bg-theme-tertiary rounded-full border border-theme">
+            <Cpu size={14} className="text-accent" />
+            <span className="text-[10px] font-bold uppercase tracking-widest text-theme-secondary">Drag & Drop Enabled</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {/* ... ProjectManager & Buttons ... */}
+          <ProjectManager
+            currentCode={code}
+            currentLanguage={language}
+            currentVisualizedVars={visualizedVariables}
+            currentIgnoredPointers={ignoredPointers}
+            onLoadProject={handleLoadProject}
+          />
+
+          <button
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+            className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary rounded-lg transition-colors"
+            title="Settings"
+          >
+            <div className="w-5 h-5 flex flex-col justify-between items-center py-0.5">
+              <span className="w-full h-0.5 bg-current rounded-full"></span>
+              <span className="w-full h-0.5 bg-current rounded-full"></span>
+              <span className="w-full h-0.5 bg-current rounded-full"></span>
+            </div>
+          </button>
+
+          <button
+            onClick={handleRun}
+            disabled={isCompiling}
+            className="flex items-center gap-2 bg-accent hover:opacity-90 text-white px-6 py-1.5 rounded-lg font-bold transition-all hover:scale-105 active:scale-95 disabled:opacity-50 shadow-lg"
+          >
+            <Play size={14} fill="currentColor" />
+            <span>RUN CODE</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* ... Settings Modal ... */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-start justify-end p-4 bg-transparent" onClick={() => setIsSettingsOpen(false)}>
+          {/* ... */}
+          <div
+            className="mt-14 w-72 bg-theme-secondary border border-theme rounded-2xl shadow-2xl p-6 animate-in slide-in-from-top-4 duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-bold text-theme-primary mb-4">Appearance</h3>
+
+            <div className="mb-6">
+              <label className="text-xs font-bold text-theme-secondary uppercase tracking-wider mb-2 block">Theme Mode</label>
+              <div className="grid grid-cols-3 gap-2 bg-theme-tertiary p-1 rounded-xl">
+                <button
+                  onClick={() => setThemeMode('light')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${themeMode === 'light' ? 'bg-white text-slate-900 shadow-sm' : 'text-theme-secondary hover:text-theme-primary'}`}
+                >
+                  <span>Light</span>
+                </button>
+                <button
+                  onClick={() => setThemeMode('dark')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 ${themeMode === 'dark' ? 'bg-slate-700 text-white shadow-sm' : 'text-theme-secondary hover:text-theme-primary'}`}
+                >
+                  <span>Dark</span>
+                </button>
+                <button
+                  onClick={() => setThemeMode('codenow')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 overflow-hidden ${themeMode === 'codenow' ? 'bg-green-500 text-white shadow-sm' : 'text-theme-secondary hover:text-theme-primary'}`}
+                >
+                  <span className="truncate">CodeNow</span>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-theme-secondary uppercase tracking-wider mb-2 block">Accent Color</label>
+              <div className={`grid grid-cols-4 gap-3 ${themeMode === 'codenow' ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+                {['blue', 'green', 'red', 'yellow'].map((color) => (
+                  <button
+                    key={color}
+                    onClick={() => setAccentColor(color)}
+                    className={`h-10 rounded-full border-2 transition-all hover:scale-110 ${accentColor === color ? 'border-theme-primary scale-110 shadow-lg' : 'border-transparent opacity-70 hover:opacity-100'}`}
+                    style={{ background: color === 'blue' ? '#3b82f6' : color === 'green' ? '#22c55e' : color === 'red' ? '#ef4444' : '#eab308' }}
+                  />
+                ))}
+              </div>
+              {themeMode === 'codenow' && <p className="text-[10px] text-theme-secondary mt-2">Accents handled by theme</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      <div className="flex-grow flex min-h-0 relative">
+
+        {/* Editor Sidebar (Split) */}
+        <div style={{ width: `${editorWidth}%` }} className="flex flex-col border-r border-theme relative shrink-0">
+
+          {/* Top Half: Code Editor */}
+          <div style={{ height: `${codeEditorHeight}%` }} className="relative font-mono text-[13px] border-b border-theme shrink-0">
+            <CodeEditor
+              code={code}
+              language={language}
+              onLanguageChange={handleLanguageChange}
+              onChange={(v) => setCode(v || '')}
+              highlightedLine={currentSnapshot.line}
+              isDarkMode={isEditorDark}
+            />
+
+            {/* Height Resize Handle */}
+            <div
+              className="absolute left-0 right-0 bottom-0 h-1 cursor-row-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100"
+              onMouseDown={() => setIsResizingCodeEditorHeight(true)}
+            />
+          </div>
+
+          {/* Bottom Half: Input/Output */}
+          <div className="flex-grow flex flex-col bg-theme-main min-h-0">
+            {/* Tabs / Header */}
+            <div className="flex border-b border-theme shrink-0">
+              <div
+                style={{ width: `${inputWidth}%` }}
+                className="px-4 py-2 text-xs font-bold text-theme-secondary border-r border-theme bg-theme-tertiary/50 transition-all"
+              >
+                INPUT
+              </div>
+              <div className="flex-grow px-4 py-2 text-xs font-bold text-theme-secondary bg-theme-tertiary/50">
+                OUTPUT
+              </div>
+            </div>
+
+            <div className="flex-grow flex min-h-0 relative">
+              {/* Input Area */}
+              <div style={{ width: `${inputWidth}%` }} className="h-full border-r border-theme relative shrink-0">
+                <textarea
+                  className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
+                  placeholder="Enter input for your code here..."
+                  value={inputVal}
+                  onChange={(e) => setInputVal(e.target.value)}
+                />
+
+                {/* Width Resize Handle */}
+                <div
+                  className="absolute top-0 bottom-0 right-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100"
+                  onMouseDown={() => setIsResizingInputWidth(true)}
+                />
+              </div>
+
+              {/* Output Area */}
+              <div className="flex-grow h-full relative bg-theme-secondary/5 min-w-0">
+                <textarea
+                  readOnly
+                  className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
+                  placeholder="Output will appear here..."
+                  value={outputVal}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Resize Handle (For Editor Width) */}
+          <div
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100 group"
+            onMouseDown={() => setIsResizingEditor(true)}
+          >
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-8 bg-theme-tertiary rounded-l-md border border-theme border-r-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="w-0.5 h-4 bg-theme-secondary"></div>
+            </div>
+          </div>
+        </div>
+
+
+        {/* Visualizer & Watch Window */}
+        <div className="flex-grow flex flex-col min-w-0">
+          <div className="flex-grow flex min-h-0 relative">
+
+            {/* Visualizer */}
+            <div className="flex-grow relative min-w-0">
+              <UnifiedVisualizer
+                heap={currentSnapshot.heap}
+                visualizedVariables={visualizedVariables}
+                onRemoveVariable={(name) => setVisualizedVariables(prev => prev.filter(v => v !== name))}
+                onAddVariable={(name) => setVisualizedVariables(prev => prev.includes(name) ? prev : [...prev, name])}
+                ignoredPointers={ignoredPointers}
+                onToggleIgnoredPointer={(varName, pointer) => {
+                  setIgnoredPointers(prev => {
+                    const currentList = prev[varName] || [];
+                    const newList = currentList.includes(pointer)
+                      ? currentList.filter(p => p !== pointer)
+                      : [...currentList, pointer];
+                    return { ...prev, [varName]: newList };
+                  });
+                }}
+                code={code}
+                currentLine={currentSnapshot.line}
+                prevLine={history[currentStepIndex - 1]?.line}
+                prevHeap={history[currentStepIndex - 1]?.heap}
+              />
+            </div>
+
+            {/* Resize Handle for Watch Window */}
+            <div
+              className="w-1 cursor-col-resize user-select-none hover:bg-accent active:bg-accent transition-colors delay-100 z-10 relative flex-shrink-0"
+              onMouseDown={() => setIsResizingWatch(true)}
+            />
+
+            {/* Watch Window */}
+            <div style={{ width: `${watchWindowWidth}px` }} className="border-l border-theme shrink-0 flex flex-col">
+              <WatchWindow heap={currentSnapshot.heap} stack={currentSnapshot.stack} />
+            </div>
+          </div>
+
+          {/* Timeline Footer */}
+          <Timeline
+            currentStep={currentStepIndex}
+            totalSteps={history.length}
+            onStepChange={setCurrentStepIndex}
+            description={currentSnapshot.description}
+            isPlaying={isPlaying}
+            onPlayPause={() => setIsPlaying(!isPlaying)}
+            playbackSpeed={playbackSpeed}
+            onSpeedChange={setPlaybackSpeed}
+          />
+        </div>
+      </div>
+    </main>
+  );
+}
