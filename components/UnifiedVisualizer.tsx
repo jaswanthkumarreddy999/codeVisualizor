@@ -39,6 +39,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
     const [explicitPointers, setExplicitPointers] = React.useState<Record<string, string[]>>({});
     // Store absolute positions (x, y) relative to the container
     const [positions, setPositions] = React.useState<Record<string, { x: number, y: number }>>({});
+    // Store sizes (width, height)
+    const [sizes, setSizes] = React.useState<Record<string, { width: number, height: number }>>({});
 
     const [animState, setAnimState] = React.useState<{
         line: number;
@@ -64,38 +66,87 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
         let match = null;
         let targetName = '', op1Name = '', op2Name = '', operator = '';
+        let explicitResult: any = undefined;
+        let secondaryOperator: string | undefined = undefined;
 
-        const assignmentRegex = /^([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)/;
-        match = lineContent.match(assignmentRegex);
+        // 1. Check for average / complex pattern like: middle = (left + right) / 2
+        // Capture the trailing operation in group 5
+        const complexRegex = /^([a-zA-Z_]\w*)\s*=\s*\(\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)\s*\)\s*(\/.*)$/;
+        match = lineContent.match(complexRegex);
 
         if (match) {
-            targetName = match[1]; op1Name = match[2]; operator = match[3]; op2Name = match[4];
+            targetName = match[1];
+            op1Name = match[2];
+            operator = match[3]; // Use the inner operator (e.g., +)
+            op2Name = match[4];
+            secondaryOperator = match[5]?.trim(); // e.g. "/ 2" or "/2"
+
+            explicitResult = heap?.[targetName];
         } else {
-            const shorthandRegex = /^([a-zA-Z_]\w*)\s*([\+\-\*\/])=\s*([a-zA-Z_]\w*)/;
-            match = lineContent.match(shorthandRegex);
+            // 2. Standard binary assignment: c = a + b
+            const assignmentRegex = /^([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)/;
+            match = lineContent.match(assignmentRegex);
+
             if (match) {
-                targetName = match[1]; operator = match[2]; op2Name = match[3]; op1Name = targetName;
+                targetName = match[1]; op1Name = match[2]; operator = match[3]; op2Name = match[4];
+            } else {
+                // 3. Shorthand: a += b
+                const shorthandRegex = /^([a-zA-Z_]\w*)\s*([\+\-\*\/])=\s*([a-zA-Z_]\w*)/;
+                match = lineContent.match(shorthandRegex);
+                if (match) {
+                    targetName = match[1]; operator = match[2]; op2Name = match[3]; op1Name = targetName;
+                } else {
+                    // 4. Simple Assignment: neutral = n
+                    const simpleAssignRegex = /^([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*;?$/;
+                    match = lineContent.match(simpleAssignRegex);
+                    if (match) {
+                        targetName = match[1];
+                        op1Name = match[2];
+                        operator = 'assign';
+                    }
+                }
             }
         }
 
-        if (targetName && op1Name && op2Name && operator) {
+        if (targetName && op1Name && (op2Name || operator === 'assign') && operator) {
             const op1Pos = positions[op1Name];
-            const op2Pos = positions[op2Name];
+            const op2Pos = op2Name ? positions[op2Name] : undefined;
             const targetPos = positions[targetName];
 
-            if (op1Pos && op2Pos && targetPos) {
+            // Helper to get center
+            const getCenter = (name: string, pos: { x: number, y: number }) => {
+                const size = sizes[name] || (
+                    // Fallback to default check logic if size not set yet (though useEffect handles it)
+                    (Array.isArray(prevHeap[name]) || (prevHeap[name] && typeof prevHeap[name] === 'object' && 'left' in prevHeap[name]))
+                        ? { width: 600, height: 500 }
+                        : { width: 150, height: 120 }
+                );
                 return {
-                    operands: [
-                        { name: op1Name, value: prevHeap[op1Name], startPos: op1Pos },
-                        { name: op2Name, value: prevHeap[op2Name], startPos: op2Pos }
-                    ],
+                    x: pos.x + size.width / 2,
+                    y: pos.y + size.height / 2
+                };
+            };
+
+            if (op1Pos && (op2Pos || operator === 'assign') && targetPos) {
+                const operands = [
+                    { name: op1Name, value: prevHeap[op1Name], startPos: getCenter(op1Name, op1Pos) }
+                ];
+
+                if (op2Name && op2Pos) {
+                    operands.push({ name: op2Name, value: prevHeap[op2Name], startPos: getCenter(op2Name, op2Pos) });
+                }
+
+                return {
+                    operands,
                     operator,
-                    target: { name: targetName, endPos: targetPos }
+                    target: { name: targetName, endPos: getCenter(targetName, targetPos) },
+                    explicitResult,
+                    secondaryOperator
                 };
             }
         }
         return null;
-    }, [code, prevLine, prevHeap, positions, animState]);
+    }, [code, prevLine, prevHeap, heap, positions, sizes, animState]);
 
     // Derived overrides
     const currentOverrideValues = React.useMemo(() => {
@@ -111,11 +162,26 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
             let placedCount = 0; // Track newly placed items in this batch for offset
 
             visualizedVariables.forEach(varName => {
+                // Initialize default sizes if missing
+                setSizes(prevSizes => {
+                    if (prevSizes[varName]) return prevSizes;
+                    const value = heap[varName];
+                    const isArray = Array.isArray(value);
+                    const isTree = value && typeof value === 'object' && (value.__viz_type === 'treenode' || 'left' in value || 'right' in value);
+                    const isSLL = value && typeof value === 'object' && (value.__viz_type === 'node' || 'next' in value);
+
+                    return {
+                        ...prevSizes,
+                        [varName]: (isArray || isTree || isSLL)
+                            ? { width: 600, height: 500 }
+                            : { width: 150, height: 120 }
+                    };
+                });
+
                 if (!newPositions[varName]) {
                     // Simple cascade strategy to avoid total overlap
                     // We base it on the TOTAL number of known positions to keep shifting down-right
                     const totalItems = Object.keys(newPositions).length + placedCount;
-                    const offset = 180; // Increased spacing
                     const startX = 50;
                     const startY = 50;
 
@@ -135,19 +201,39 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
             return hasChanges ? newPositions : prev;
         });
-    }, [visualizedVariables]);
+    }, [visualizedVariables, heap]);
 
-    const handleDragEnd = (name: string, info: any) => {
-        setPositions(prev => {
-            const current = prev[name] || { x: 0, y: 0 };
-            return {
-                ...prev,
-                [name]: {
-                    x: current.x + info.offset.x,
-                    y: current.y + info.offset.y
-                }
-            };
-        });
+    const containerRef = React.useRef<HTMLDivElement>(null);
+    const itemsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
+
+    const handleDragEnd = (name: string) => {
+        if (!containerRef.current) return;
+
+        const element = itemsRef.current[name];
+        if (!element) return;
+
+        const container = containerRef.current;
+        const containerRect = container.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const startWidth = sizes[name]?.width || 150;
+        const startHeight = sizes[name]?.height || 100;
+
+        // Get container padding to correct the origin (absolute top-0 left-0 starts after padding)
+        const computedStyle = window.getComputedStyle(container);
+        const paddingLeft = parseFloat(computedStyle.paddingLeft) || 0;
+        const paddingTop = parseFloat(computedStyle.paddingTop) || 0;
+
+        // Calculate exact position relative to the scrollable container content
+        // Origin (0,0) for the element is at (Left+PaddingLeft, Top+PaddingTop) of container
+        // So we want: Delta from Border - Padding
+
+        const newX = (elementRect.left - containerRect.left) + container.scrollLeft - paddingLeft;
+        const newY = (elementRect.top - containerRect.top) + container.scrollTop - paddingTop;
+
+        setPositions(prev => ({
+            ...prev,
+            [name]: { x: newX, y: newY }
+        }));
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -160,14 +246,41 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         const varName = e.dataTransfer.getData('application/react-dnd-var');
         if (varName) {
             onAddVariable(varName);
-            // Optional: Use drop coordinates to set position?
-            // To do this properly, we'd need to subtract container rect.
-            // For now, let the useEffect handle placement, or improved later.
         }
+    };
+
+    const handleResize = (name: string, e: React.MouseEvent, direction: string) => {
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startWidth = sizes[name]?.width || 150;
+        const startHeight = sizes[name]?.height || 100;
+
+        const onMouseMove = (moveEvent: MouseEvent) => {
+            const deltaX = moveEvent.clientX - startX;
+            const deltaY = moveEvent.clientY - startY;
+
+            setSizes(prev => ({
+                ...prev,
+                [name]: {
+                    width: Math.max(100, startWidth + deltaX),
+                    height: Math.max(80, startHeight + deltaY)
+                }
+            }));
+        };
+
+        const onMouseUp = () => {
+            window.removeEventListener('mousemove', onMouseMove);
+            window.removeEventListener('mouseup', onMouseUp);
+        };
+
+        window.addEventListener('mousemove', onMouseMove);
+        window.addEventListener('mouseup', onMouseUp);
     };
 
     return (
         <div
+            ref={containerRef}
             className="w-full h-full relative overflow-auto bg-transparent p-4"
             onDragOver={handleDragOver}
             onDrop={handleDrop}
@@ -179,6 +292,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     operands={activeAnim.operands}
                     operator={activeAnim.operator}
                     target={activeAnim.target}
+                    explicitResult={activeAnim.explicitResult}
+                    secondaryOperator={activeAnim.secondaryOperator}
                     onComplete={() => {
                         // Delay clearing the animation/override to allow ghost to settle
                         setTimeout(() => {
@@ -189,6 +304,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     }}
                 />
             )}
+
+
 
             {visualizedVariables.length === 0 && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-theme-secondary pointer-events-none opacity-50">
@@ -224,6 +341,9 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                 let Content;
                 let ContainerClasses;
 
+                // Base positioning classes
+                const BaseClasses = "absolute top-0 left-0";
+
                 if (!isArray && !isTree && !isSLL) {
                     // Simple Value
                     Content = (
@@ -235,10 +355,10 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             suppressAnimation={!!(activeAnim && activeAnim.target.name === varName)}
                         />
                     );
-                    ContainerClasses = ''; // Logic moved inside PrimitiveVisualizer
+                    ContainerClasses = BaseClasses;
                 } else {
                     // Complex Visualizer
-                    ContainerClasses = `absolute top-0 left-0 w-full max-w-4xl min-w-[600px] h-[500px] rounded-3xl overflow-hidden border transition-all ${selectedVar === varName
+                    ContainerClasses = `${BaseClasses} rounded-3xl overflow-hidden border transition-all ${selectedVar === varName
                         ? 'border-accent ring-2 ring-accent shadow-[0_0_30px_var(--accent-light)] z-40'
                         : 'border-transparent hover:border-theme-tertiary hover:bg-theme-secondary/5 z-0'
                         }`;
@@ -280,21 +400,35 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     );
                 }
 
+                const defaultSize = (isArray || isTree || isSLL) ? { width: 600, height: 500 } : { width: 150, height: 120 };
+                const currentSize = sizes[varName] || defaultSize;
+
                 return (
                     <motion.div
                         key={varName}
+                        ref={(el) => { itemsRef.current[varName] = el; }}
                         drag
                         dragMomentum={false}
                         initial={pos}
                         animate={pos}
-                        onDragEnd={(_, info) => handleDragEnd(varName, info)}
+                        onDragEnd={() => handleDragEnd(varName)}
                         whileHover={{ cursor: 'grab', scale: 1.01 }}
                         whileDrag={{ cursor: 'grabbing', scale: 1.02, zIndex: 100 }}
                         onClick={(e) => { e.stopPropagation(); setSelectedVar(varName); }}
                         className={`group ${ContainerClasses}`}
-                        style={{ x: 0, y: 0 }} // Reset any implicit checks, we drive via animate
+                        style={{ width: currentSize.width, height: currentSize.height }} // Drive size via state
                     >
                         {Content}
+
+                        {/* Resize Handle */}
+                        {selectedVar === varName && (
+                            <div
+                                className="absolute bottom-1 right-1 w-4 h-4 cursor-nwse-resize z-50 flex items-center justify-center opacity-50 hover:opacity-100"
+                                onMouseDown={(e) => handleResize(varName, e, 'se')}
+                            >
+                                <div className="w-0 h-0 border-l-[8px] border-l-transparent border-b-[8px] border-b-accent/50 max-w-full max-h-full" />
+                            </div>
+                        )}
                     </motion.div>
                 );
             })}

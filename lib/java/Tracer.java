@@ -124,7 +124,7 @@ public class Tracer {
     }
 
     private static void enableStepRequest(ThreadReference thread) {
-        StepRequest stepRequest = vm.eventRequestManager().createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_OVER);
+        StepRequest stepRequest = vm.eventRequestManager().createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
         // We can add class filter to only step in our class?
         stepRequest.addClassFilter(TARGET_CLASS);
         stepRequest.enable();
@@ -139,7 +139,17 @@ public class Tracer {
             // Current Line
             int line = loc.lineNumber();
             
-            // Roots (Local Variables)
+            // Stack Trace
+            List<Map<String, Object>> stackTrace = new ArrayList<>();
+            for (StackFrame f : thread.frames()) {
+                Map<String, Object> frameData = new HashMap<>();
+                frameData.put("name", f.location().method().name());
+                frameData.put("line", f.location().lineNumber());
+                frameData.put("class", f.location().declaringType().name());
+                stackTrace.add(frameData);
+            }
+
+            // Roots (Local Variables of Top Frame)
             Map<String, Object> roots = new HashMap<>();
             
             try {
@@ -156,11 +166,30 @@ public class Tracer {
                 // Local variable info might be missing if not compiled with -g
                 roots.put("<error>", "Compile with -g to see locals");
             }
+
+            // Capture Static Fields of the Target Class
+            try {
+                // We need the ReferenceType of the target class
+                // We can get it from the location if we are in it?
+                // Or search by name?
+                 if (loc.declaringType().name().equals(TARGET_CLASS)) {
+                     ReferenceType type = loc.declaringType();
+                     for (Field field : type.allFields()) {
+                         if (field.isStatic() && !field.isSynthetic()) {
+                             Value val = type.getValue(field);
+                             roots.put(field.name(), serialize(val));
+                         }
+                     }
+                 }
+            } catch (Exception e) {
+                // Ignore statics error
+            }
             
             Map<String, Object> step = new HashMap<>();
             step.put("line", line);
             step.put("roots", roots);
-            step.put("store", deepCloneStore()); // Snapshot of the store for this step? 
+            step.put("stack", stackTrace); // Added stack
+            step.put("store", deepCloneStore()); 
             // Optimizing: Actually we can just dump the current state of 'store' 
             // assuming the historical playback doesn't mutate past stores?
             // JS frontend might assume store references are stable. 
@@ -244,6 +273,10 @@ public class Tracer {
              // Detect linked list node
              if (fieldsData.containsKey("next") || (fieldsData.containsKey("val") && fieldsData.containsKey("next"))) {
                  objectData.put("__viz_type", "node");
+             }
+             // Detect tree node
+             if (fieldsData.containsKey("left") && fieldsData.containsKey("right")) {
+                 objectData.put("__viz_type", "treenode");
              }
              
              objectData.put("value", fieldsData);

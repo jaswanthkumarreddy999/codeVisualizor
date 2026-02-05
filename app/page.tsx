@@ -8,7 +8,8 @@ import { WatchWindow } from '@/components/WatchWindow';
 import { instrument } from '@/lib/engine/instrumenter';
 import { ExecutionEngine, StateSnapshot } from '@/lib/engine/state-machine';
 import { ProjectManager, SavedProject } from '@/components/ProjectManager';
-import { Play, Zap, FileCode, Cpu, ChevronDown } from 'lucide-react';
+
+import { Play, Zap, FileCode, Cpu, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
 const DEFAULT_TS_CODE = `// Trapping Rain Water (Visualized)
 let height = [4, 2, 0, 3, 2, 5];
@@ -151,7 +152,7 @@ function hydrateBackendHistory(history: any[]): StateSnapshot[] {
 
     return {
       heap,
-      stack: {},
+      stack: step.stack || {}, // Hydrate stack from step
       line,
       description: `Line ${line}`
     };
@@ -180,6 +181,29 @@ export default function Home() {
   // New Resizable States
   const [codeEditorHeight, setCodeEditorHeight] = useState(50); // Percentage of Left Column
   const [inputWidth, setInputWidth] = useState(50); // Percentage of IO Panel
+
+  // Collapse States
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isIOCollapsed, setIsIOCollapsed] = useState(false);
+  const [isWatchCollapsed, setIsWatchCollapsed] = useState(false);
+
+  // Ref to store previous widths before collapse
+  const prevEditorWidth = React.useRef(33.33);
+  const prevWatchWidth = React.useRef(320);
+
+  const toggleSidebar = () => {
+    if (isSidebarCollapsed) {
+      setEditorWidth(prevEditorWidth.current);
+    } else {
+      prevEditorWidth.current = editorWidth;
+      setEditorWidth(0);
+    }
+    setIsSidebarCollapsed(!isSidebarCollapsed);
+  };
+
+  const toggleWatchWindow = () => {
+    setIsWatchCollapsed(!isWatchCollapsed);
+  };
 
   const [isResizingEditor, setIsResizingEditor] = useState(false);
   const [isResizingWatch, setIsResizingWatch] = useState(false);
@@ -545,80 +569,116 @@ export default function Home() {
       <div className="flex-grow flex min-h-0 relative">
 
         {/* Editor Sidebar (Split) */}
-        <div style={{ width: `${editorWidth}%` }} className="flex flex-col border-r border-theme relative shrink-0">
+        {/* Editor Sidebar (Split) */}
+        {!isSidebarCollapsed && (
+          <div style={{ width: `${editorWidth}%` }} className="flex flex-col border-r border-theme relative shrink-0 transition-all duration-300">
+            {/* Header / Collapse Trigger */}
+            <button
+              onClick={toggleSidebar}
+              className="absolute top-1/2 -right-3 z-50 w-6 h-6 bg-theme-tertiary border border-theme rounded-full flex items-center justify-center hover:bg-accent text-theme-secondary hover:text-white transition-colors shadow-sm"
+            >
+              <ChevronLeft size={14} />
+            </button>
 
-          {/* Top Half: Code Editor */}
-          <div style={{ height: `${codeEditorHeight}%` }} className="relative font-mono text-[13px] border-b border-theme shrink-0">
-            <CodeEditor
-              code={code}
-              language={language}
-              onLanguageChange={handleLanguageChange}
-              onChange={(v) => setCode(v || '')}
-              highlightedLine={currentSnapshot.line}
-              isDarkMode={isEditorDark}
-            />
+            {/* Top Half: Code Editor */}
+            <div style={{ height: isIOCollapsed ? '100%' : `${codeEditorHeight}%` }} className="relative font-mono text-[13px] border-b border-theme shrink-0 transition-all duration-300">
+              <CodeEditor
+                code={code}
+                language={language}
+                onLanguageChange={handleLanguageChange}
+                onChange={(v) => setCode(v || '')}
+                highlightedLine={currentSnapshot.line}
+                isDarkMode={isEditorDark}
+              />
 
-            {/* Height Resize Handle */}
-            <div
-              className="absolute left-0 right-0 bottom-0 h-1 cursor-row-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100"
-              onMouseDown={() => setIsResizingCodeEditorHeight(true)}
-            />
-          </div>
-
-          {/* Bottom Half: Input/Output */}
-          <div className="flex-grow flex flex-col bg-theme-main min-h-0">
-            {/* Tabs / Header */}
-            <div className="flex border-b border-theme shrink-0">
-              <div
-                style={{ width: `${inputWidth}%` }}
-                className="px-4 py-2 text-xs font-bold text-theme-secondary border-r border-theme bg-theme-tertiary/50 transition-all"
-              >
-                INPUT
-              </div>
-              <div className="flex-grow px-4 py-2 text-xs font-bold text-theme-secondary bg-theme-tertiary/50">
-                OUTPUT
-              </div>
-            </div>
-
-            <div className="flex-grow flex min-h-0 relative">
-              {/* Input Area */}
-              <div style={{ width: `${inputWidth}%` }} className="h-full border-r border-theme relative shrink-0">
-                <textarea
-                  className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
-                  placeholder="Enter input for your code here..."
-                  value={inputVal}
-                  onChange={(e) => setInputVal(e.target.value)}
-                />
-
-                {/* Width Resize Handle */}
+              {/* Height Resize Handle - Only show if IO is visible */}
+              {!isIOCollapsed && (
                 <div
-                  className="absolute top-0 bottom-0 right-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100"
-                  onMouseDown={() => setIsResizingInputWidth(true)}
-                />
+                  className="absolute left-0 right-0 bottom-0 h-1 cursor-row-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100 flex justify-center group"
+                  onMouseDown={() => setIsResizingCodeEditorHeight(true)}
+                >
+                  <div className="w-8 h-4 bg-theme-tertiary rounded-full border border-theme flex items-center justify-center -mb-2 overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="w-4 h-0.5 bg-theme-secondary"></div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Half: Input/Output */}
+            <div className={`flex flex-col bg-theme-main min-h-0 transition-all duration-300 ${isIOCollapsed ? 'h-8 shrink-0 overflow-hidden' : 'flex-grow'}`}>
+              {/* Tabs / Header */}
+              <div className="flex border-b border-theme shrink-0 bg-theme-tertiary/50 relative">
+                <div
+                  style={{ width: `${inputWidth}%` }}
+                  className="px-4 py-2 text-xs font-bold text-theme-secondary border-r border-theme transition-all flex justify-between items-center"
+                >
+                  INPUT
+                </div>
+                <div className="flex-grow px-4 py-2 text-xs font-bold text-theme-secondary flex justify-between items-center">
+                  OUTPUT
+                  <button
+                    onClick={() => setIsIOCollapsed(!isIOCollapsed)}
+                    className="hover:text-accent transition-colors"
+                  >
+                    {isIOCollapsed ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+                  </button>
+                </div>
               </div>
 
-              {/* Output Area */}
-              <div className="flex-grow h-full relative bg-theme-secondary/5 min-w-0">
-                <textarea
-                  readOnly
-                  className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
-                  placeholder="Output will appear here..."
-                  value={outputVal}
-                />
+              <div className="flex-grow flex min-h-0 relative">
+                {/* Input Area */}
+                <div style={{ width: `${inputWidth}%` }} className="h-full border-r border-theme relative shrink-0">
+                  <textarea
+                    className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
+                    placeholder="Enter input for your code here..."
+                    value={inputVal}
+                    onChange={(e) => setInputVal(e.target.value)}
+                  />
+
+                  {/* Width Resize Handle */}
+                  <div
+                    className="absolute top-0 bottom-0 right-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100"
+                    onMouseDown={() => setIsResizingInputWidth(true)}
+                  />
+                </div>
+
+                {/* Output Area */}
+                <div className="flex-grow h-full relative bg-theme-secondary/5 min-w-0">
+                  <textarea
+                    readOnly
+                    className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
+                    placeholder="Output will appear here..."
+                    value={outputVal}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Resize Handle (For Editor Width) */}
+            <div
+              className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100 group"
+              onMouseDown={() => setIsResizingEditor(true)}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-8 bg-theme-tertiary rounded-l-md border border-theme border-r-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="w-0.5 h-4 bg-theme-secondary"></div>
               </div>
             </div>
           </div>
 
-          {/* Resize Handle (For Editor Width) */}
-          <div
-            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100 group"
-            onMouseDown={() => setIsResizingEditor(true)}
-          >
-            <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-8 bg-theme-tertiary rounded-l-md border border-theme border-r-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              <div className="w-0.5 h-4 bg-theme-secondary"></div>
-            </div>
+        )}
+
+        {/* Start Collapsed Sidebar Trigger (When sidebar is hidden) */}
+        {isSidebarCollapsed && (
+          <div className="w-10 border-r border-theme h-full flex flex-col items-center py-4 gap-4 bg-theme-tertiary/20 shrink-0">
+            <button
+              onClick={toggleSidebar}
+              className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-theme-secondary/50 text-theme-secondary hover:text-accent transition-all"
+              title="Expand Editor"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
           </div>
-        </div>
+        )}
 
 
         {/* Visualizer & Watch Window */}
@@ -650,15 +710,38 @@ export default function Home() {
             </div>
 
             {/* Resize Handle for Watch Window */}
-            <div
-              className="w-1 cursor-col-resize user-select-none hover:bg-accent active:bg-accent transition-colors delay-100 z-10 relative flex-shrink-0"
-              onMouseDown={() => setIsResizingWatch(true)}
-            />
+            {!isWatchCollapsed && (
+              <div
+                className="w-1 cursor-col-resize user-select-none hover:bg-accent active:bg-accent transition-colors delay-100 z-10 relative flex-shrink-0"
+                onMouseDown={() => setIsResizingWatch(true)}
+              />
+            )}
 
             {/* Watch Window */}
-            <div style={{ width: `${watchWindowWidth}px` }} className="border-l border-theme shrink-0 flex flex-col">
-              <WatchWindow heap={currentSnapshot.heap} stack={currentSnapshot.stack} />
-            </div>
+            {isWatchCollapsed ? (
+              <div className="w-10 border-l border-theme h-full flex flex-col items-center py-4 bg-theme-tertiary/20 shrink-0">
+                <button
+                  onClick={toggleWatchWindow}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-theme-secondary/50 text-theme-secondary hover:text-accent transition-all"
+                  title="Open Watch Window"
+                >
+                  <PanelRightOpen size={18} />
+                </button>
+                <div className="mt-8 [writing-mode:vertical-rl] rotate-180 text-xs font-bold tracking-widest text-theme-secondary uppercase opacity-50">
+                  Heap Explorer
+                </div>
+              </div>
+            ) : (
+              <div style={{ width: `${watchWindowWidth}px` }} className="border-l border-theme shrink-0 flex flex-col relative transition-all duration-300">
+                <button
+                  onClick={toggleWatchWindow}
+                  className="absolute top-1/2 -left-3 z-50 w-6 h-6 bg-theme-tertiary border border-theme rounded-full flex items-center justify-center hover:bg-accent text-theme-secondary hover:text-white transition-colors shadow-sm"
+                >
+                  <ChevronRight size={14} />
+                </button>
+                <WatchWindow heap={currentSnapshot.heap} stack={currentSnapshot.stack} />
+              </div>
+            )}
           </div>
 
           {/* Timeline Footer */}

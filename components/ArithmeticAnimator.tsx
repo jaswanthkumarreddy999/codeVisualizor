@@ -19,17 +19,23 @@ export interface ArithmeticAnimatorProps {
     operator: string;
     target: ArithmeticTarget;
     onComplete: () => void;
+    explicitResult?: any;
+    secondaryOperator?: string;
 }
 
 export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
     operands,
     operator,
     target,
-    onComplete
+    onComplete,
+    explicitResult,
+    secondaryOperator
 }) => {
     // Stage 0: Initial spawn
-    // Stage 1: Move to meeting point
-    // Stage 2: Show result moving to target
+    // Stage 1: Move to meeting point (Primary Op Merge) -> Shows Intermediate Result (e.g. 8)
+    // Stage 2: Secondary Op Merge (if exists) -> Shows Secondary Op (e.g. / 2) interacting
+    // Stage 3: Transform to Final Result (e.g. 4) -> Moves to target
+    // Stage 4: Completed
     const [stage, setStage] = useState(0);
 
     // Calculate meeting point (average of operand positions)
@@ -42,56 +48,75 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
     const meetingPoint = { x: midX, y: midY - 50 }; // Lift it up a bit
 
     useEffect(() => {
-        // Sequence: 
-        // 0ms: Start
-        // 500ms: Arrive at meeting point
-        // 1000ms: Result moves to target
-        // 1500ms: Finish
+        // Sequence Management
+        let t1: NodeJS.Timeout, t2: NodeJS.Timeout, t3: NodeJS.Timeout, t4: NodeJS.Timeout;
 
-        const t1 = setTimeout(() => setStage(1), 100);
-        const t2 = setTimeout(() => setStage(2), 800);
-        // Reduce gap: 800 + 600ms transition = 1400ms. Provide small buffer 1450ms.
-        const t3 = setTimeout(() => onComplete(), 1450);
+        if (secondaryOperator) {
+            // Extended Sequence for 2-step operations
+            // 0ms: Start (Spawn)
+            // 500ms: Operands arrive & merge -> Show Intermediate Result (8)
+            t1 = setTimeout(() => setStage(1), 100);
+
+            // 1200ms: Show Secondary Op (/ 2) fading in next to 8
+            t2 = setTimeout(() => setStage(2), 1200);
+
+            // 2200ms: Transform 8 & /2 into Final Result (4) & Move to target
+            t3 = setTimeout(() => setStage(3), 2200);
+
+            // 3000ms: Finish
+            t4 = setTimeout(() => onComplete(), 3000);
+        } else {
+            // Standard Sequence
+            // 0ms: Start
+            // 500ms: Arrive at meeting point
+            // 1000ms: Result moves to target
+            t1 = setTimeout(() => setStage(1), 100);
+            t2 = setTimeout(() => setStage(3), 800); // Skip stage 2
+            t3 = setTimeout(() => onComplete(), 1450);
+        }
 
         return () => {
-            clearTimeout(t1);
-            clearTimeout(t2);
-            clearTimeout(t3);
+            clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
         };
-    }, []);
+    }, [secondaryOperator]);
 
-    // Calculate result for display
-    const resultValue = React.useMemo(() => {
+    // Calculate intermediate result (e.g. 5 + 3 = 8)
+    const intermediateResult = React.useMemo(() => {
+        if (operands.length === 1) return operands[0].value;
         if (operands.length < 2) return '?';
         const val1 = Number(operands[0].value);
         const val2 = Number(operands[1].value);
-
         if (isNaN(val1) || isNaN(val2)) return '?';
 
         switch (operator) {
             case '+': return val1 + val2;
             case '-': return val1 - val2;
             case '*': return val1 * val2;
-            case '/': return parseFloat((val1 / val2).toFixed(2)); // Clean decimals
+            case '/': return parseFloat((val1 / val2).toFixed(2));
             default: return '?';
         }
     }, [operands, operator]);
 
+    // Calculate final result
+    const resultValue = React.useMemo(() => {
+        if (explicitResult !== undefined) return explicitResult;
+        return intermediateResult;
+    }, [operands, operator, explicitResult, intermediateResult]);
+
     return (
         <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
             <AnimatePresence>
-                {/* Operands Flying In */}
-                {stage < 2 && operands.map((op, idx) => (
+                {/* Operands Flying In (Visible until Stage 1 complete or Stage 2 start) */}
+                {stage < 3 && operands.map((op, idx) => (
                     <motion.div
                         key={`op-${idx}`}
                         initial={{ x: op.startPos.x, y: op.startPos.y, opacity: 0.5, scale: 0.8 }}
                         animate={{
                             x: meetingPoint.x + (idx === 0 ? -20 : 20), // Slight separation
                             y: meetingPoint.y,
-                            opacity: 1,
+                            opacity: stage >= 1 ? 0 : 1, // Fade out once they meet (replaced by intermediate result)
                             scale: 1,
                         }}
-                        exit={{ opacity: 0, scale: 0.5 }}
                         transition={{ duration: 0.6, ease: "easeInOut" }}
                         className="absolute flex flex-col items-center"
                     >
@@ -105,8 +130,9 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
                 ))}
 
                 {/* Operator Symbol */}
-                {stage < 2 && (
+                {stage < 1 && operator !== 'assign' && (
                     <motion.div
+                        key="operator"
                         initial={{ x: midX, y: midY, opacity: 0, scale: 0 }}
                         animate={{ x: meetingPoint.x, y: meetingPoint.y, opacity: 1, scale: 1.5 }}
                         transition={{ duration: 0.4, delay: 0.2 }}
@@ -116,17 +142,52 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
                     </motion.div>
                 )}
 
-                {/* Result Flying to Target */}
-                {stage >= 2 && (
+                {/* Intermediate Result (e.g. "8") */}
+                {stage >= 1 && stage < 3 && (
                     <motion.div
-                        initial={{ x: meetingPoint.x, y: meetingPoint.y, scale: 1.2, opacity: 1 }}
+                        key="intermediate"
+                        initial={{ x: meetingPoint.x, y: meetingPoint.y, scale: 0.5, opacity: 0 }}
+                        animate={{
+                            scale: 1.2,
+                            opacity: 1,
+                            x: secondaryOperator ? (meetingPoint.x - 20) : meetingPoint.x // Shift left if showing secondary op
+                        }}
+                        exit={{ scale: 0.5, opacity: 0 }} // Fade out when transforming to final
+                        transition={{ duration: 0.3 }}
+                        className="absolute"
+                    >
+                        <div className="bg-theme-tertiary/90 text-white px-3 py-1 rounded-lg border border-white/20 shadow-lg font-bold text-xl">
+                            {intermediateResult}
+                        </div>
+                    </motion.div>
+                )}
+
+                {/* Secondary Operator (e.g. "/ 2") */}
+                {stage >= 2 && stage < 3 && secondaryOperator && (
+                    <motion.div
+                        key="secondary"
+                        initial={{ x: meetingPoint.x + 20, y: meetingPoint.y, opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.5 }}
+                        transition={{ duration: 0.4 }}
+                        className="absolute font-mono text-lg text-accent font-bold bg-black/50 px-2 rounded ml-2"
+                    >
+                        {secondaryOperator}
+                    </motion.div>
+                )}
+
+                {/* Final Result Flying to Target */}
+                {stage >= 3 && (
+                    <motion.div
+                        key="final"
+                        initial={{ x: meetingPoint.x, y: meetingPoint.y, scale: 1.2, opacity: 0 }} // Start invisible
                         animate={{
                             x: target.endPos.x,
                             y: target.endPos.y,
                             scale: 0.5,
-                            opacity: 0
+                            opacity: [0, 1, 1, 0] // Fade in at start, then out at end
                         }}
-                        transition={{ duration: 0.6, ease: "backIn" }}
+                        transition={{ duration: 0.8, ease: "easeInOut" }}
                         className="absolute"
                     >
                         <div className="bg-accent text-white px-4 py-2 rounded-xl shadow-[0_0_30px_var(--accent)] font-bold text-xl min-w-[60px] text-center border-2 border-white/20">

@@ -59,8 +59,20 @@ export const WatchWindow: React.FC<WatchWindowProps> = ({ heap, stack }) => {
                 <Box size={16} />
                 <span className="text-xs font-bold uppercase tracking-wider">Stack Trace</span>
             </div>
-            <div className="h-32 p-4 text-xs font-mono text-theme-secondary italic">
-                (No local scope active)
+            <div className="flex-grow h-32 overflow-auto p-4 text-xs font-mono text-theme-secondary space-y-2">
+                {Array.isArray(stack) && stack.length > 0 ? (
+                    stack.map((frame: any, idx: number) => (
+                        <div key={idx} className="flex flex-col border-l-2 border-theme pl-2">
+                            <span className="font-bold text-accent">{frame.name}</span>
+                            <div className="flex justify-between items-center text-[10px] opacity-70">
+                                <span>{frame.class || 'Unknown'}</span>
+                                <span>Line {frame.line}</span>
+                            </div>
+                        </div>
+                    ))
+                ) : (
+                    <div className="italic opacity-50">(No local scope active)</div>
+                )}
             </div>
         </div>
     );
