@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BarChart2, StretchHorizontal } from 'lucide-react';
+import { BarChart2, StretchHorizontal, Layers } from 'lucide-react';
 
 interface ArrayVisualizerProps {
     heap: Record<string, any>;
@@ -10,12 +10,14 @@ interface ArrayVisualizerProps {
     visualizedVariables?: string[];
     ignoredPointers?: string[];
     onToggleIgnoredPointer: (variableName: string, pointer: string) => void;
-    viewMode: 'bar' | 'box';
-    onViewModeChange: (mode: 'bar' | 'box') => void;
+    viewMode: 'bar' | 'box' | 'stack';
+    onViewModeChange: (mode: 'bar' | 'box' | 'stack') => void;
     activePointers?: string[];
     onAddPointer?: (name: string) => void;
     onRemovePointer?: (name: string) => void;
 }
+
+
 
 export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
     heap,
@@ -49,6 +51,36 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
         val.length === data.length
     );
     const secondaryData = secondaryEntry ? secondaryEntry[1] : [];
+
+
+
+    // 4. Rectangle Highlight
+    const rawRect = heap[`${variableName}_rect`];
+    let rect: { start: number, end: number, height: number } | null = null;
+    if (rawRect) {
+        if (Array.isArray(rawRect) && rawRect.length >= 3) {
+            rect = { start: Number(rawRect[0]), end: Number(rawRect[1]), height: Number(rawRect[2]) };
+        } else if (typeof rawRect === 'object' && 'start' in rawRect) {
+            rect = rawRect;
+        }
+    }
+
+    const resolveValue = (val: any): number => {
+        if (typeof val === 'number') return val;
+        // Resolve Java Object References (e.g. Integer objects in Stack)
+        if (val && typeof val === 'object' && val.__viz_ref) {
+           const obj = heap[val.__viz_ref];
+           if (obj) {
+               // Java Wrapper types (Integer, Double) usually have a 'value' field.
+               // Our tracer flattens fields into the object.
+               if (obj.value !== undefined) {
+                   const v = Number(obj.value);
+                   if (!isNaN(v)) return v;
+               }
+           }
+        }
+        return Number(val);
+    };
 
     const handleDragOver = (e: React.DragEvent) => {
         e.preventDefault();
@@ -93,6 +125,13 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                     >
                         <StretchHorizontal size={16} />
                     </button>
+                    <button
+                        onClick={() => onViewModeChange('stack')}
+                        className={`p-1.5 rounded-md transition-all ${viewMode === 'stack' ? 'bg-theme-secondary text-accent shadow-sm' : 'text-theme-secondary hover:text-theme-primary'}`}
+                        title="Stack View"
+                    >
+                        <Layers size={16} />
+                    </button>
                 </div>
             </div>
 
@@ -102,8 +141,8 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                 <div className="flex-grow w-full flex items-end justify-center gap-1 pb-12 px-8 relative">
                     <AnimatePresence mode="popLayout">
                         {data.map((rawVal: any, idx: number) => {
-                            const val = Number(rawVal);
-                            const isActive = pointers.some(p => p.value === idx);
+                            const val = resolveValue(rawVal);
+                            const isActive = pointers.some(p => p.value === idx) || (rect && idx >= rect.start && idx <= rect.end);
 
                             // Calculate heights
                             const heightPct = Math.max((val / maxVal) * 100, 2);
@@ -151,6 +190,17 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                             ) : null}
                                         </motion.div>
 
+                                        {/* Rectangle Highlight */}
+                                        {rect && idx >= rect.start && idx <= rect.end && (
+                                            <motion.div
+                                                initial={{ height: 0 }}
+                                                animate={{ 
+                                                    height: `${Math.min(100, ((rect.height / maxVal) * 100) / (heightPct + waterHeightPct) * 100)}%` 
+                                                }}
+                                                className="absolute bottom-0 w-full bg-yellow-500/50 border-t-2 border-yellow-400 z-30 shadow-[0_0_10px_rgba(234,179,8,0.3)] pointer-events-none"
+                                            />
+                                        )}
+
                                         {/* Label Above Bar (for small values) */}
                                         {heightPct <= 15 && (
                                             <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-xs font-bold text-theme-primary z-20">
@@ -189,12 +239,65 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                         })}
                     </AnimatePresence>
                 </div>
+            ) : viewMode === 'stack' ? (
+                /* Stack View Area */
+                <div className="flex-grow w-full flex flex-col-reverse items-center justify-start gap-2 pb-12 px-8 relative overflow-y-auto">
+                    <AnimatePresence mode="popLayout" initial={false}>
+                        {data.map((rawVal: any, idx: number) => {
+                            const val = resolveValue(rawVal);
+                            const isActive = pointers.some(p => p.value === idx);
+
+                            return (
+                                <motion.div
+                                    key={idx}
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.1 } }}
+                                    className="relative group w-48"
+                                >
+                                    {/* Pointer Labels (Side) */}
+                                    {pointers.filter(p => p.value === idx).length > 0 && (
+                                        <div className="absolute right-full mr-4 top-1/2 -translate-y-1/2 flex flex-col items-end gap-1 w-max z-10">
+                                            {pointers.filter(p => p.value === idx).map(p => (
+                                                <motion.div
+                                                    key={p.name}
+                                                    initial={{ opacity: 0, x: 10 }}
+                                                    animate={{ opacity: 1, x: 0 }}
+                                                    className="px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap bg-accent cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1"
+                                                    onClick={(e) => { e.stopPropagation(); }}
+                                                    onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
+                                                    title="Double click to remove pointer"
+                                                >
+                                                    {p.name}
+                                                    <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-0 h-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[4px]" style={{ borderLeftColor: 'var(--accent)' }} />
+                                                </motion.div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Stack Item (Dish) */}
+                                    <div
+                                        className={`h-12 w-full flex items-center justify-center rounded-xl border-2 font-bold text-sm transition-all duration-300 relative shadow-sm ${isActive
+                                            ? 'border-accent bg-accent/10 text-accent shadow-[0_0_20px_var(--accent-light)]'
+                                            : 'border-theme-secondary/50 bg-theme-tertiary/50 text-theme-primary'
+                                            }`}
+                                    >
+                                        <div className="absolute left-2 text-[9px] font-mono text-theme-secondary opacity-50">
+                                            {idx}
+                                        </div>
+                                        {isNaN(val) ? String(rawVal) : val}
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
+                    </AnimatePresence>
+                </div>
             ) : (
                 /* Box View Area */
                 <div className="flex-grow w-full flex items-center justify-center gap-2 pb-12 px-8 relative overflow-x-auto">
                     <AnimatePresence mode="popLayout">
                         {data.map((rawVal: any, idx: number) => {
-                            const val = Number(rawVal);
+                            const val = resolveValue(rawVal);
                             const isActive = pointers.some(p => p.value === idx);
 
                             return (

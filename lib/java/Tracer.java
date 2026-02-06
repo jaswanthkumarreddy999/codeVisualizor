@@ -5,6 +5,7 @@ import com.sun.jdi.event.*;
 import com.sun.jdi.request.EventRequest;
 import com.sun.jdi.request.StepRequest;
 import com.sun.jdi.request.EventRequestManager; // Added import
+import com.sun.jdi.connect.Transport; // Added import
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -16,10 +17,10 @@ public class Tracer {
     private static Map<String, String> objIdMap = new HashMap<>(); // ObjectReference unique ID -> UUID (String)
     private static Map<String, Object> store = new HashMap<>(); // Heap storage
     private static List<Map<String, Object>> history = new ArrayList<>();
-    
+
     // To identify our target class
-    private static String TARGET_CLASS; 
-    
+    private static String TARGET_CLASS;
+
     // Output buffers
     private static StringBuilder targetStdout = new StringBuilder();
     private static StringBuilder targetStderr = new StringBuilder();
@@ -33,7 +34,7 @@ public class Tracer {
 
         // 1. Launch the target VM
         vm = launchTarget(TARGET_CLASS);
-        
+
         // 1.5 Start threads to gobble output
         Process process = vm.process();
         Thread outThread = new Thread(() -> readStream(process.getInputStream(), targetStdout));
@@ -50,37 +51,54 @@ public class Tracer {
 
         // 3. Event Loop
         runEventLoop(vm);
-        
-        // Wait for output threads to finish? They might block if process doesn't close streams?
+
+        // Wait for output threads to finish? They might block if process doesn't close
+        // streams?
         // VM death should close them.
         try {
             outThread.join(1000);
             errThread.join(1000);
-        } catch (InterruptedException e) {}
-        
+        } catch (InterruptedException e) {
+        }
+
         // 4. Output Result
         printJsonResult();
     }
-    
+
     private static void readStream(InputStream is, StringBuilder sb) {
         try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
             String line;
             while ((line = br.readLine()) != null) {
                 sb.append(line).append("\n");
             }
-        } catch (Exception e) { }
+        } catch (Exception e) {
+        }
     }
 
     private static VirtualMachine launchTarget(String mainClass) throws Exception {
-        LaunchingConnector launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
+        // Find a connector that uses "dt_socket" transport
+        LaunchingConnector launchingConnector = null;
+        for (LaunchingConnector lc : Bootstrap.virtualMachineManager().launchingConnectors()) {
+            Transport t = lc.transport();
+            if (t != null && "dt_socket".equals(t.name())) {
+                launchingConnector = lc;
+                break;
+            }
+        }
+
+        // Fallback to default if not found
+        if (launchingConnector == null) {
+            launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
+        }
+
         Map<String, Connector.Argument> arguments = launchingConnector.defaultArguments();
         arguments.get("main").setValue(mainClass);
         // Use the current classpath for the target VM so it can find the user class
         String currentCp = System.getProperty("java.class.path");
-        arguments.get("options").setValue("-cp \"" + currentCp + "\""); 
+        arguments.get("options").setValue("-cp \"" + currentCp + "\"");
         return launchingConnector.launch(arguments);
     }
-    
+
     private static void runEventLoop(VirtualMachine vm) throws Exception {
         EventQueue eventQueue = vm.eventQueue();
         boolean connected = true;
@@ -94,27 +112,27 @@ public class Tracer {
                     ReferenceType classType = evt.referenceType();
                     // Find main method
                     Method mainMethod = classType.methodsByName("main").get(0);
-                    
+
                     // Breakpoint at start of main
                     Location loc = mainMethod.location();
                     vm.eventRequestManager().createBreakpointRequest(loc).enable();
-                    
+
                 } else if (event instanceof BreakpointEvent) {
                     // We hit main. Now enable stepping.
                     BreakpointEvent bp = (BreakpointEvent) event;
                     enableStepRequest(bp.thread());
-                    
+
                     // Trace this state too? Yes.
                     traceState(bp.thread());
-                    
+
                 } else if (event instanceof StepEvent) {
                     StepEvent se = (StepEvent) event;
-                    
+
                     // Only trace if we are in the target class
                     if (se.location().declaringType().name().equals(TARGET_CLASS)) {
                         traceState(se.thread());
                     }
-                    
+
                 } else if (event instanceof VMDeathEvent || event instanceof VMDisconnectEvent) {
                     connected = false;
                 }
@@ -124,21 +142,26 @@ public class Tracer {
     }
 
     private static void enableStepRequest(ThreadReference thread) {
-        StepRequest stepRequest = vm.eventRequestManager().createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
+        StepRequest stepRequest = vm.eventRequestManager().createStepRequest(thread, StepRequest.STEP_LINE,
+                StepRequest.STEP_INTO);
         // We can add class filter to only step in our class?
         stepRequest.addClassFilter(TARGET_CLASS);
         stepRequest.enable();
     }
 
+    private static ThreadReference currentThread; // Added to support invokeMethod
+
     private static void traceState(ThreadReference thread) {
+        currentThread = thread; // Update current thread
         try {
-            if (thread.frameCount() == 0) return;
+            if (thread.frameCount() == 0)
+                return;
             StackFrame frame = thread.frame(0);
             Location loc = frame.location();
-            
+
             // Current Line
             int line = loc.lineNumber();
-            
+
             // Stack Trace
             List<Map<String, Object>> stackTrace = new ArrayList<>();
             for (StackFrame f : thread.frames()) {
@@ -151,12 +174,12 @@ public class Tracer {
 
             // Roots (Local Variables of Top Frame)
             Map<String, Object> roots = new HashMap<>();
-            
+
             try {
                 // Get all visible variables
                 List<LocalVariable> visibleVars = frame.visibleVariables();
                 Map<LocalVariable, Value> values = frame.getValues(visibleVars);
-                
+
                 for (Map.Entry<LocalVariable, Value> entry : values.entrySet()) {
                     LocalVariable var = entry.getKey();
                     Value val = entry.getValue();
@@ -172,32 +195,34 @@ public class Tracer {
                 // We need the ReferenceType of the target class
                 // We can get it from the location if we are in it?
                 // Or search by name?
-                 if (loc.declaringType().name().equals(TARGET_CLASS)) {
-                     ReferenceType type = loc.declaringType();
-                     for (Field field : type.allFields()) {
-                         if (field.isStatic() && !field.isSynthetic()) {
-                             Value val = type.getValue(field);
-                             roots.put(field.name(), serialize(val));
-                         }
-                     }
-                 }
+                if (loc.declaringType().name().equals(TARGET_CLASS)) {
+                    ReferenceType type = loc.declaringType();
+                    for (Field field : type.allFields()) {
+                        if (field.isStatic() && !field.isSynthetic()) {
+                            Value val = type.getValue(field);
+                            roots.put(field.name(), serialize(val));
+                        }
+                    }
+                }
             } catch (Exception e) {
                 // Ignore statics error
             }
-            
+
             Map<String, Object> step = new HashMap<>();
             step.put("line", line);
             step.put("roots", roots);
             step.put("stack", stackTrace); // Added stack
-            step.put("store", deepCloneStore()); 
-            // Optimizing: Actually we can just dump the current state of 'store' 
+            step.put("store", deepCloneStore());
+            // Optimizing: Actually we can just dump the current state of 'store'
             // assuming the historical playback doesn't mutate past stores?
-            // JS frontend might assume store references are stable. 
-            // But if an object changes content, we need a new version or the store needs to represent the state AT THAT TIME.
-            // Python tracer creates a new "store" snapshot every time. We should do the same copy.
-            
+            // JS frontend might assume store references are stable.
+            // But if an object changes content, we need a new version or the store needs to
+            // represent the state AT THAT TIME.
+            // Python tracer creates a new "store" snapshot every time. We should do the
+            // same copy.
+
             history.add(step);
-            
+
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -205,25 +230,128 @@ public class Tracer {
 
     // Serialize a JDI Value into a JSON-friendly object (primitives) or a Reference
     private static Object serialize(Value value) {
-        if (value == null) return null;
-        
+        if (value == null)
+            return null;
+
         if (value instanceof PrimitiveValue) {
             // Boolean, Byte, Char, Double, Float, Integer, Long, Short
-            if (value instanceof BooleanValue) return ((BooleanValue)value).value();
-            if (value instanceof IntegerValue) return ((IntegerValue)value).value();
-            if (value instanceof DoubleValue) return ((DoubleValue)value).value();
-            if (value instanceof FloatValue) return ((FloatValue)value).value();
-            if (value instanceof LongValue) return ((LongValue)value).value();
-            if (value instanceof ShortValue) return ((ShortValue)value).value();
-            if (value instanceof ByteValue) return ((ByteValue)value).value();
-            if (value instanceof CharValue) return String.valueOf(((CharValue)value).value());
+            if (value instanceof BooleanValue)
+                return ((BooleanValue) value).value();
+            if (value instanceof IntegerValue)
+                return ((IntegerValue) value).value();
+            if (value instanceof DoubleValue)
+                return ((DoubleValue) value).value();
+            if (value instanceof FloatValue)
+                return ((FloatValue) value).value();
+            if (value instanceof LongValue)
+                return ((LongValue) value).value();
+            if (value instanceof ShortValue)
+                return ((ShortValue) value).value();
+            if (value instanceof ByteValue)
+                return ((ByteValue) value).value();
+            if (value instanceof CharValue)
+                return String.valueOf(((CharValue) value).value());
             return value.toString();
         } else if (value instanceof StringReference) {
             return ((StringReference) value).value();
         } else if (value instanceof ObjectReference) {
-            return serializeObject((ObjectReference) value);
+            ObjectReference objRef = (ObjectReference) value;
+            String typeName = objRef.referenceType().name();
+
+            // 1. Try Field Access First (Fastest and usually reliable)
+            try {
+                if (typeName.equals("java.lang.Integer")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((IntegerValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Double")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((DoubleValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Float")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((FloatValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Long")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((LongValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Short")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((ShortValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Byte")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((ByteValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Boolean")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return ((BooleanValue) objRef.getValue(f)).value();
+                } else if (typeName.equals("java.lang.Character")) {
+                    Field f = objRef.referenceType().fieldByName("value");
+                    if (f != null)
+                        return String.valueOf(((CharValue) objRef.getValue(f)).value());
+                }
+            } catch (Exception e) {
+                // Field access failed
+            }
+
+            // 2. Try Method Invocation Second (Fallback)
+            if (currentThread != null) {
+                try {
+                    if (typeName.equals("java.lang.Integer")) {
+                        Method m = objRef.referenceType().methodsByName("intValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((IntegerValue) v).value();
+                    } else if (typeName.equals("java.lang.Double")) {
+                        Method m = objRef.referenceType().methodsByName("doubleValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((DoubleValue) v).value();
+                    } else if (typeName.equals("java.lang.Float")) {
+                        Method m = objRef.referenceType().methodsByName("floatValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((FloatValue) v).value();
+                    } else if (typeName.equals("java.lang.Long")) {
+                        Method m = objRef.referenceType().methodsByName("longValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((LongValue) v).value();
+                    } else if (typeName.equals("java.lang.Short")) {
+                        Method m = objRef.referenceType().methodsByName("shortValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((ShortValue) v).value();
+                    } else if (typeName.equals("java.lang.Byte")) {
+                        Method m = objRef.referenceType().methodsByName("byteValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((ByteValue) v).value();
+                    } else if (typeName.equals("java.lang.Boolean")) {
+                        Method m = objRef.referenceType().methodsByName("booleanValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return ((BooleanValue) v).value();
+                    } else if (typeName.equals("java.lang.Character")) {
+                        Method m = objRef.referenceType().methodsByName("charValue").get(0);
+                        Value v = objRef.invokeMethod(currentThread, m, Collections.emptyList(), 0);
+                        return String.valueOf(((CharValue) v).value());
+                    }
+                } catch (Exception e) {
+                    // Invoke failed
+                }
+            }
+
+            // 3. Fallback: Return error string for Wrappers instead of object ref
+            // This ensures we don't get "NaN" in frontend
+            if (typeName.startsWith("java.lang.")) {
+                if (typeName.equals("java.lang.Integer") || typeName.equals("java.lang.Double") ||
+                        typeName.equals("java.lang.Float") || typeName.equals("java.lang.Long") ||
+                        typeName.equals("java.lang.Short") || typeName.equals("java.lang.Byte") ||
+                        typeName.equals("java.lang.Boolean") || typeName.equals("java.lang.Character")) {
+                    return "<Unboxing Failed>";
+                }
+            }
+
+            return serializeObject(objRef);
         }
-        
+
         return value.toString();
     }
 
@@ -231,105 +359,147 @@ public class Tracer {
         // Manage Identity
         String uniqueID = String.valueOf(objRef.uniqueID());
         String vizID;
-        
+
         if (objIdMap.containsKey(uniqueID)) {
-             vizID = objIdMap.get(uniqueID);
+            vizID = objIdMap.get(uniqueID);
         } else {
-             vizID = UUID.randomUUID().toString().substring(0, 8);
-             objIdMap.put(uniqueID, vizID);
+            vizID = UUID.randomUUID().toString().substring(0, 8);
+            objIdMap.put(uniqueID, vizID);
         }
 
         // Check if we need to (re)capture the object state.
         // For simplicity, we recapture it every time if it's mutable?
         // Or we just update the 'store'.
         // Python tracer serializes everything recursively.
-        
+
         Map<String, Object> objectData = new HashMap<>();
         objectData.put("__viz_id", vizID);
-        
-        if (objRef instanceof ArrayReference) {
-             ArrayReference arrayRef = (ArrayReference) objRef;
-             objectData.put("type", "array");
-             List<Object> content = new ArrayList<>();
-             for (Value v : arrayRef.getValues()) {
-                 content.add(serialize(v));
-             }
-             objectData.put("value", content);
-        } else {
-             objectData.put("type", "object");
-             // Fields
-             Map<String, Object> fieldsData = new HashMap<>();
-             ReferenceType refType = objRef.referenceType();
-             for (Field field : refType.allFields()) {
-                 // Skip statics for now? Or include them?
-                 if (field.isStatic()) continue; 
-                 // Skip synthetic
-                 if (field.isSynthetic()) continue;
 
-                 Value val = objRef.getValue(field);
-                 fieldsData.put(field.name(), serialize(val));
-             }
-             
-             // Detect linked list node
-             if (fieldsData.containsKey("next") || (fieldsData.containsKey("val") && fieldsData.containsKey("next"))) {
-                 objectData.put("__viz_type", "node");
-             }
-             // Detect tree node
-             if (fieldsData.containsKey("left") && fieldsData.containsKey("right")) {
-                 objectData.put("__viz_type", "treenode");
-             }
-             
-             objectData.put("value", fieldsData);
-             
-             // Merge fields into top level for convenience if desired, but frontend expects 'value' for generic objects usually?
-             // Actually python tracer does: 
-             // store[id] = { ...content, __viz_id, __viz_type } 
-             // where content is the dict of fields.
-             // Let's match that structure.
-             objectData.putAll(fieldsData);
+        if (objRef instanceof ArrayReference) {
+            ArrayReference arrayRef = (ArrayReference) objRef;
+            objectData.put("type", "array");
+            List<Object> content = new ArrayList<>();
+            for (Value v : arrayRef.getValues()) {
+                content.add(serialize(v));
+            }
+            objectData.put("value", content);
+        } else {
+            objectData.put("type", "object");
+            // Fields
+            Map<String, Object> fieldsData = new HashMap<>();
+            ReferenceType refType = objRef.referenceType();
+            for (Field field : refType.allFields()) {
+                // Skip statics for now? Or include them?
+                if (field.isStatic())
+                    continue;
+                // Skip synthetic
+                if (field.isSynthetic())
+                    continue;
+
+                Value val = objRef.getValue(field);
+                fieldsData.put(field.name(), serialize(val));
+            }
+
+            // Detect linked list node
+            if (fieldsData.containsKey("next") || (fieldsData.containsKey("val") && fieldsData.containsKey("next"))) {
+                objectData.put("__viz_type", "node");
+            }
+            // Detect tree node
+            if (fieldsData.containsKey("left") && fieldsData.containsKey("right")) {
+                objectData.put("__viz_type", "treenode");
+            }
+
+            // Detect java.util.Stack (or Vector/ArrayList) and treat as Array for
+            // visualization
+            if (refType.name().equals("java.util.Stack") || refType.name().equals("java.util.ArrayList")
+                    || refType.name().equals("java.util.Vector")) {
+                try {
+                    Field fieldData = refType.fieldByName("elementData");
+                    Field fieldCount = refType.fieldByName("elementCount"); // Vector/Stack has elementCount
+                    if (fieldCount == null)
+                        fieldCount = refType.fieldByName("size"); // ArrayList has size
+
+                    if (fieldData != null && fieldCount != null) {
+                        Value dataVal = objRef.getValue(fieldData);
+                        Value countVal = objRef.getValue(fieldCount);
+
+                        if (dataVal instanceof ArrayReference && countVal instanceof IntegerValue) {
+                            ArrayReference arrRef = (ArrayReference) dataVal;
+                            int count = ((IntegerValue) countVal).value();
+
+                            objectData.put("type", "array");
+                            List<Object> content = new ArrayList<>();
+                            // Only add up to count
+                            for (int i = 0; i < count; i++) {
+                                if (i < arrRef.length()) { // Safety check
+                                    content.add(serialize(arrRef.getValue(i)));
+                                }
+                            }
+                            objectData.put("value", content);
+                            store.put(vizID, objectData);
+
+                            Map<String, String> ref = new HashMap<>();
+                            ref.put("__viz_ref", vizID);
+                            return ref;
+                        }
+                    }
+                } catch (Exception e) {
+                    // Fallback to default object serialization
+                }
+            }
+
+            objectData.put("value", fieldsData);
+
+            // Merge fields into top level for convenience
+            objectData.putAll(fieldsData);
         }
-        
+
         store.put(vizID, objectData);
-        
+
         Map<String, String> ref = new HashMap<>();
         ref.put("__viz_ref", vizID);
         return ref;
     }
-    
+
     private static Map<String, Object> deepCloneStore() {
-        // Deep clone the store map? 
-        // The values in store are Maps or Lists. We need to snapshot them because they might be mutated in next step?
-        // Actually, in our logic, we create NEW Maps for objectData every time `serializeObject` is called.
+        // Deep clone the store map?
+        // The values in store are Maps or Lists. We need to snapshot them because they
+        // might be mutated in next step?
+        // Actually, in our logic, we create NEW Maps for objectData every time
+        // `serializeObject` is called.
         // So `store.put(vizID, objectData)` replaces the old object data with new one.
         // But `history` needs to keep the OLD store state.
         // So yes, we need to clone the current state of `store` for this history step.
-        // Since `store` contains Map<String, Object> which are newly created each step, we just need a shallow copy of the store map itself?
+        // Since `store` contains Map<String, Object> which are newly created each step,
+        // we just need a shallow copy of the store map itself?
         // No, if we don't re-serialize an object, it stays in store?
         // Wait, `serializeObject` is called for every visible variable.
-        // If an object is NOT reachable from current roots, it might arguably still be in store from previous steps.
+        // If an object is NOT reachable from current roots, it might arguably still be
+        // in store from previous steps.
         // But for visualization, we usually show what's capturing.
-        // Ideally: clear store at start of traceState? 
-        // Python tracer: 
+        // Ideally: clear store at start of traceState?
+        // Python tracer:
         // store = {} inside trace_execution loop.
         // So it rebuilds store from scratch for reachable objects.
         // Let's do that.
-        return new HashMap<>(store); 
+        return new HashMap<>(store);
     }
-    
+
     // Quick and dirty JSON printer
     private static void printJsonResult() {
         StringBuilder sb = new StringBuilder();
         sb.append("{");
-        
+
         // Output Stderr/Stdout
         sb.append("\"stdout\":").append(toJson(targetStdout.toString())).append(",");
         sb.append("\"stderr\":").append(toJson(targetStderr.toString())).append(",");
-        
+
         sb.append("\"history\": [");
         for (int i = 0; i < history.size(); i++) {
             Map<String, Object> step = history.get(i);
             sb.append(toJson(step));
-            if (i < history.size() - 1) sb.append(",");
+            if (i < history.size() - 1)
+                sb.append(",");
         }
         sb.append("]");
         sb.append("}");
@@ -337,16 +507,20 @@ public class Tracer {
     }
 
     private static String toJson(Object o) {
-        if (o == null) return "null";
-        if (o instanceof String) return "\"" + escape((String)o) + "\"";
-        if (o instanceof Number || o instanceof Boolean) return o.toString();
+        if (o == null)
+            return "null";
+        if (o instanceof String)
+            return "\"" + escape((String) o) + "\"";
+        if (o instanceof Number || o instanceof Boolean)
+            return o.toString();
         if (o instanceof List) {
             List<?> l = (List<?>) o;
             StringBuilder sb = new StringBuilder();
             sb.append("[");
             for (int i = 0; i < l.size(); i++) {
                 sb.append(toJson(l.get(i)));
-                if (i < l.size() - 1) sb.append(",");
+                if (i < l.size() - 1)
+                    sb.append(",");
             }
             sb.append("]");
             return sb.toString();
@@ -359,7 +533,8 @@ public class Tracer {
             for (Map.Entry<?, ?> entry : m.entrySet()) {
                 sb.append("\"").append(entry.getKey()).append("\":");
                 sb.append(toJson(entry.getValue()));
-                if (i < m.size() - 1) sb.append(",");
+                if (i < m.size() - 1)
+                    sb.append(",");
                 i++;
             }
             sb.append("}");
@@ -367,8 +542,9 @@ public class Tracer {
         }
         return "\"" + o.toString() + "\"";
     }
-    
+
     private static String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t",
+                "\\t");
     }
 }

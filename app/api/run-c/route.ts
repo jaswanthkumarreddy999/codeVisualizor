@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile, mkdir, rm, unlink } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
         const sourcePath = join(tmpDir, 'program.c');
         const binaryPath = join(tmpDir, 'program');
 
-        await execAsync(`mkdir -p ${tmpDir}`);
+        await mkdir(tmpDir, { recursive: true });
         await writeFile(sourcePath, code);
 
         // Compile
@@ -34,8 +34,10 @@ export async function POST(req: Request) {
 
         // Run with GDB Tracer
         const tracerScript = join(process.cwd(), 'lib/c/gdb_tracer.py');
+        const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+        
         const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string }>((resolve, reject) => {
-            const child = exec(`python3 "${tracerScript}" "${binaryPath}"`, { timeout: 10000 }, (error, stdout, stderr) => {
+            const child = exec(`"${pythonCmd}" "${tracerScript}" "${binaryPath}"`, { timeout: 10000 }, (error, stdout, stderr) => {
                 resolve({ stdout: stdout as string, stderr: stderr as string });
             });
 
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: e.message }, { status: 500 });
     } finally {
         if (tmpDir) {
-            try { await execAsync(`rm -rf "${tmpDir}"`); } catch (e) { }
+            try { await rm(tmpDir, { recursive: true, force: true }); } catch (e) { }
         }
     }
 }

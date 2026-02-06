@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile, mkdir, rm, unlink } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
@@ -25,7 +25,8 @@ export async function POST(req: Request) {
 
         const id = nanoid();
         const tmpDir = join(process.cwd(), 'tmp', id);
-        await execAsync(`mkdir -p ${tmpDir}`);
+        
+        await mkdir(tmpDir, { recursive: true });
 
         let processedCode = code;
         // Simple regex to rename public class to Main if present
@@ -57,13 +58,18 @@ export async function POST(req: Request) {
         // Run with Tracer
         // java -cp <classpath of tracer>:<classpath of user code> Tracer Main
         const tracerClassPath = join(process.cwd(), 'lib/java');
+        const sep = process.platform === 'win32' ? ';' : ':';
 
         const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string }>((resolve, reject) => {
             // NOTE: We need to include the current directory (or where Tracer is) and the user code directory in classpath
             // Also need to allow JDI access if needed, but Tracer is standard java program. 
             // However, Tracer USES com.sun.jdi which is in the JDK.
 
-            const child = exec(`java -cp "${tracerClassPath}:${classPath}" Tracer Main`, { timeout: 10000 }, (error, stdout, stderr) => {
+            // Add memory limits via environment variable which applies to both Tracer and Child VM
+            const child = exec(`java -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, { 
+                timeout: 10000,
+                env: { ...process.env, JAVA_TOOL_OPTIONS: '-Xmx64m' }
+            }, (error, stdout, stderr) => {
                 resolve({ stdout: stdout as string, stderr: stderr as string });
             });
 
@@ -106,7 +112,7 @@ export async function POST(req: Request) {
     } finally {
         if (filePath) {
             // Cleanup the unique temp directory
-            try { await execAsync(`rm -rf "${classPath}"`); } catch (e) { }
+            try { await rm(classPath, { recursive: true, force: true }); } catch (e) { }
         }
     }
 }

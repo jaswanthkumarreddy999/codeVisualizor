@@ -248,12 +248,12 @@ export const TreeVisualizer: React.FC<VisualizerProps> = ({ heap, variableName }
                                     <div className="flex items-center justify-center w-full h-full overflow-hidden">
                                         {(Array.isArray(node.data) || Array.isArray(node.snapshot)) ? (
                                             <div className="flex gap-0.5 flex-wrap justify-center p-0.5">
-                                                {(node.data || node.snapshot).slice(0, 4).map((val: any, idx: number) => (
+                                                {(node.data || node.snapshot).slice(0, 6).map((val: any, idx: number) => (
                                                     <div key={idx} className="w-4 h-4 flex items-center justify-center bg-black/40 rounded-[2px] text-[8px] font-mono text-accent">
                                                         {val}
                                                     </div>
                                                 ))}
-                                                {(node.data || node.snapshot).length > 4 && <span className="text-[8px] text-theme-secondary">...</span>}
+                                                {(node.data || node.snapshot).length > 6 && <span className="text-[8px] text-theme-secondary">...</span>}
                                             </div>
                                         ) : (
                                             <span className="text-xs font-bold text-gray-100 truncate px-1 max-w-full" title={String(node.displayValue)}>

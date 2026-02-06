@@ -35,12 +35,24 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
     prevHeap
 }) => {
     const [selectedVar, setSelectedVar] = React.useState<string | null>(null);
-    const [viewModes, setViewModes] = React.useState<Record<string, 'bar' | 'box'>>({});
+    const [viewModes, setViewModes] = React.useState<Record<string, 'bar' | 'box' | 'stack'>>({});
     const [explicitPointers, setExplicitPointers] = React.useState<Record<string, string[]>>({});
     // Store absolute positions (x, y) relative to the container
     const [positions, setPositions] = React.useState<Record<string, { x: number, y: number }>>({});
     // Store sizes (width, height)
     const [sizes, setSizes] = React.useState<Record<string, { width: number, height: number }>>({});
+
+    // Auto-detect view mode for new variables
+    React.useEffect(() => {
+        visualizedVariables.forEach(varName => {
+            if (!viewModes[varName]) {
+                const isStack = varName.toLowerCase().includes('stack');
+                if (isStack) {
+                    setViewModes(prev => ({ ...prev, [varName]: 'stack' }));
+                }
+            }
+        });
+    }, [visualizedVariables]);
 
     const [animState, setAnimState] = React.useState<{
         line: number;
