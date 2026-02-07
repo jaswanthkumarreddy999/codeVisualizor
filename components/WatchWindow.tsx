@@ -61,15 +61,17 @@ export const WatchWindow: React.FC<WatchWindowProps> = ({ heap, stack }) => {
             </div>
             <div className="flex-grow h-32 overflow-auto p-4 text-xs font-mono text-theme-secondary space-y-2">
                 {Array.isArray(stack) && stack.length > 0 ? (
-                    stack.map((frame: any, idx: number) => (
-                        <div key={idx} className="flex flex-col border-l-2 border-theme pl-2">
-                            <span className="font-bold text-accent">{frame.name}</span>
-                            <div className="flex justify-between items-center text-[10px] opacity-70">
-                                <span>{frame.class || 'Unknown'}</span>
-                                <span>Line {frame.line}</span>
+                    stack
+                        .filter((frame: any) => frame.name !== 'traceCondition')
+                        .map((frame: any, idx: number) => (
+                            <div key={idx} className="flex flex-col border-l-2 border-theme pl-2">
+                                <span className="font-bold text-accent">{frame.name}</span>
+                                <div className="flex justify-between items-center text-[10px] opacity-70">
+                                    <span>{frame.class || 'Unknown'}</span>
+                                    <span>Line {frame.line}</span>
+                                </div>
                             </div>
-                        </div>
-                    ))
+                        ))
                 ) : (
                     <div className="italic opacity-50">(No local scope active)</div>
                 )}

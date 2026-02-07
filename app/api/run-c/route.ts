@@ -16,7 +16,7 @@ export async function POST(req: Request) {
         const id = nanoid();
         tmpDir = join(process.cwd(), 'tmp', id);
         const sourcePath = join(tmpDir, 'program.c');
-        const binaryPath = join(tmpDir, 'program');
+        const binaryPath = join(tmpDir, process.platform === 'win32' ? 'program.exe' : 'program');
 
         await mkdir(tmpDir, { recursive: true });
         await writeFile(sourcePath, code);
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
         // Run with GDB Tracer
         const tracerScript = join(process.cwd(), 'lib/c/gdb_tracer.py');
         const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
-        
+
         const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string }>((resolve, reject) => {
             const child = exec(`"${pythonCmd}" "${tracerScript}" "${binaryPath}"`, { timeout: 10000 }, (error, stdout, stderr) => {
                 resolve({ stdout: stdout as string, stderr: stderr as string });

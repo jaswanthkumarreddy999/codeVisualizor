@@ -5,6 +5,7 @@ export interface StateSnapshot {
     stack: Record<string, any>;
     line: number;
     description: string;
+    conditionResult?: boolean;
 }
 
 export class ExecutionEngine {
@@ -78,7 +79,8 @@ export class ExecutionEngine {
                 heap: this.cloneHeap(this.currentHeap),
                 stack: {},
                 line,
-                description: `${type} ${name}`
+                description: `${type} ${name}`,
+                conditionResult: type === 'condition' ? !!value : undefined
             });
 
             return processedValue;

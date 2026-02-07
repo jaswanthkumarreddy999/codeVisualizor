@@ -146,3 +146,13 @@ input[type="range"]::-webkit-slider-thumb {
   background-color: var(--accent-light);
   border-left: 2px solid var(--accent);
 }
+
+.condition-pass-highlight {
+  background-color: rgba(34, 197, 94, 0.2); /* Green-500 @ 20% */
+  border-left: 2px solid #22c55e;
+}
+
+.condition-fail-highlight {
+  background-color: rgba(239, 68, 68, 0.2); /* Red-500 @ 20% */
+  border-left: 2px solid #ef4444;
+}

@@ -117,6 +117,60 @@ export function instrument(code: string): string {
                     }
                 }
             },
+
+            IfStatement(path) {
+                if ((path.node as any)._processed) return;
+
+                const test = path.node.test;
+                // Avoid double wrapping
+                if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
+
+                const traceCall = t.callExpression(t.identifier('_trace'), [
+                    t.stringLiteral('if condition'),
+                    test,
+                    t.numericLiteral(path.node.loc?.start.line || 0),
+                    t.stringLiteral('condition'),
+                ]);
+
+                path.node.test = traceCall;
+                (path.node as any)._processed = true;
+            },
+
+            WhileStatement(path) {
+                if ((path.node as any)._processed) return;
+
+                const test = path.node.test;
+                // Avoid double wrapping
+                if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
+
+                const traceCall = t.callExpression(t.identifier('_trace'), [
+                    t.stringLiteral('while condition'),
+                    test,
+                    t.numericLiteral(path.node.loc?.start.line || 0),
+                    t.stringLiteral('condition'),
+                ]);
+
+                path.node.test = traceCall;
+                (path.node as any)._processed = true;
+            },
+
+            DoWhileStatement(path) {
+                if ((path.node as any)._processed) return;
+
+                const test = path.node.test;
+                // Avoid double wrapping
+                if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
+
+                const traceCall = t.callExpression(t.identifier('_trace'), [
+                    t.stringLiteral('do-while condition'),
+                    test,
+                    t.numericLiteral(path.node.loc?.start.line || 0),
+                    t.stringLiteral('condition'),
+                ]);
+
+                path.node.test = traceCall;
+                (path.node as any)._processed = true;
+            },
         });
 
         return generate(ast).code;

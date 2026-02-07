@@ -16,7 +16,7 @@ export async function POST(req: Request) {
         const id = nanoid();
         tmpDir = join(process.cwd(), 'tmp', id);
         const sourcePath = join(tmpDir, 'program.cpp');
-        const binaryPath = join(tmpDir, 'program');
+        const binaryPath = join(tmpDir, process.platform === 'win32' ? 'program.exe' : 'program');
 
         await mkdir(tmpDir, { recursive: true });
         await writeFile(sourcePath, code);

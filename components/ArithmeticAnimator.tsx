@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 export interface ArithmeticOperand {
     name: string;
     value: any;
-    startPos: { x: number; y: number };
+    startPos?: { x: number; y: number }; // Optional for "virtual" operands (not on canvas)
 }
 
 export interface ArithmeticTarget {
@@ -17,7 +17,7 @@ export interface ArithmeticTarget {
 export interface ArithmeticAnimatorProps {
     operands: ArithmeticOperand[];
     operator: string;
-    target: ArithmeticTarget;
+    target?: ArithmeticTarget;
     onComplete: () => void;
     explicitResult?: any;
     secondaryOperator?: string;
@@ -38,61 +38,89 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
     // Stage 4: Completed
     const [stage, setStage] = useState(0);
 
-    // Calculate meeting point (average of operand positions)
-    const midX = operands.reduce((acc, curr) => acc + curr.startPos.x, 0) / operands.length;
-    const midY = operands.reduce((acc, curr) => acc + curr.startPos.y, 0) / operands.length;
+    // Filter out operands that don't have a startPos (virtual ones)
+    const visibleOperands = operands.filter(op => op.startPos);
 
-    // Adjust meeting point slightly to be visible between them, or just use the mid point
-    // If only 1 operand (like a+=1 where the second is literal/implicit), we might need logic.
-    // For now assuming we get explicit operands.
-    const meetingPoint = { x: midX, y: midY - 50 }; // Lift it up a bit
+    let meetingPoint = { x: 0, y: 0 };
+
+    if (visibleOperands.length > 0) {
+        // Calculate meeting point from visible operands
+        const midX = visibleOperands.reduce((acc, curr) => acc + curr.startPos!.x, 0) / visibleOperands.length;
+        const midY = visibleOperands.reduce((acc, curr) => acc + curr.startPos!.y, 0) / visibleOperands.length;
+        meetingPoint = { x: midX, y: midY - 50 };
+    } else {
+        // Fallback for when no variables are on canvas: Use center of viewport (approx) or a fixed offset
+        // Since we are inside an absolute container, we might not know the exact "center" of the view.
+        // But (WindowWidth/2, WindowHeight/2) is a decent guess if we can get it, or just a fixed safe spot.
+        // Ideally, UnifiedVisualizer passes us a "center" prop, but for now let's try a reasonable default like (400, 300)
+        // or try to center based on the container if possible.
+        // A safe bet is a fixed position that looks good in the "empty" void.
+        meetingPoint = { x: 500, y: 300 };
+    }
 
     useEffect(() => {
         // Sequence Management
-        let t1: NodeJS.Timeout, t2: NodeJS.Timeout, t3: NodeJS.Timeout, t4: NodeJS.Timeout;
+        let t1: NodeJS.Timeout, t2: NodeJS.Timeout, t3: NodeJS.Timeout, t4: NodeJS.Timeout, t5: NodeJS.Timeout;
 
         if (secondaryOperator) {
             // Extended Sequence for 2-step operations
             // 0ms: Start (Spawn)
-            // 500ms: Operands arrive & merge -> Show Intermediate Result (8)
-            t1 = setTimeout(() => setStage(1), 100);
+            // 800ms: Operands arrive & merge -> Show Intermediate Result (e.g. 1)
+            t1 = setTimeout(() => setStage(1), 800);
 
-            // 1200ms: Show Secondary Op (/ 2) fading in next to 8
-            t2 = setTimeout(() => setStage(2), 1200);
+            // 1800ms: Show Secondary Op (e.g. == 0) fading in
+            t2 = setTimeout(() => setStage(2), 1800);
 
-            // 2200ms: Transform 8 & /2 into Final Result (4) & Move to target
-            t3 = setTimeout(() => setStage(3), 2200);
+            // 3000ms: Evaluation Pause (Let user see '1 == 0') -> Start Fade Swap
+            // Stage 3: Fade IN Final Result, Fade OUT Intermediate/Secondary
+            t3 = setTimeout(() => setStage(3), 3000);
 
-            // 3000ms: Finish
-            t4 = setTimeout(() => onComplete(), 3000);
+            // 4500ms: Move to target (if exists) or Finish
+            t4 = setTimeout(() => setStage(4), 4500);
+
+            // 5500ms: Finish
+            t5 = setTimeout(() => onComplete(), 5500);
         } else {
             // Standard Sequence
             // 0ms: Start
-            // 500ms: Arrive at meeting point
-            // 1000ms: Result moves to target
-            t1 = setTimeout(() => setStage(1), 100);
-            t2 = setTimeout(() => setStage(3), 800); // Skip stage 2
-            t3 = setTimeout(() => onComplete(), 1450);
+            // 800ms: Arrive at meeting point
+            // 2000ms: Result moves to target
+            t1 = setTimeout(() => setStage(1), 800);
+            t2 = setTimeout(() => setStage(4), 2000);
+            t3 = setTimeout(() => onComplete(), 3000);
         }
 
         return () => {
-            clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
+            clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5);
         };
     }, [secondaryOperator]);
 
     // Calculate intermediate result (e.g. 5 + 3 = 8)
     const intermediateResult = React.useMemo(() => {
-        if (operands.length === 1) return operands[0].value;
-        if (operands.length < 2) return '?';
-        const val1 = Number(operands[0].value);
-        const val2 = Number(operands[1].value);
-        if (isNaN(val1) || isNaN(val2)) return '?';
+        if (operands.length === 1 && operator !== '!') return operands[0].value;
+        if (operands.length < 2 && operator !== '!') return '?'; // Unary operators?
+
+        const rawVal1 = operands[0].value;
+        const rawVal2 = operands[1] ? operands[1].value : undefined;
+
+        // For Arithmetic, force numbers
+        const numVal1 = Number(rawVal1);
+        const numVal2 = Number(rawVal2);
 
         switch (operator) {
-            case '+': return val1 + val2;
-            case '-': return val1 - val2;
-            case '*': return val1 * val2;
-            case '/': return parseFloat((val1 / val2).toFixed(2));
+            case '+': return numVal1 + numVal2;
+            case '-': return numVal1 - numVal2;
+            case '*': return numVal1 * numVal2;
+            case '/': return parseFloat((numVal1 / numVal2).toFixed(2));
+            case '%': return numVal1 % numVal2;
+            // Comparisons - Use raw values for '==' to allow string comparison, etc.
+            // But prefer numeric comparison if both are numbers? JS handles (1 < 2) and ("a" < "b").
+            case '==': return rawVal1 == rawVal2;
+            case '!=': return rawVal1 != rawVal2;
+            case '<': return rawVal1 < rawVal2;
+            case '>': return rawVal1 > rawVal2;
+            case '<=': return rawVal1 <= rawVal2;
+            case '>=': return rawVal1 >= rawVal2;
             default: return '?';
         }
     }, [operands, operator]);
@@ -103,38 +131,63 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
         return intermediateResult;
     }, [operands, operator, explicitResult, intermediateResult]);
 
+    const strValue = String(resultValue).toLowerCase();
+    const isTrue = strValue === 'true';
+    const isFalse = strValue === 'false';
+    const isBooleanResult = isTrue || isFalse;
+
+    const resultColorClass = isBooleanResult
+        ? (isTrue ? 'bg-green-600 border-green-400 shadow-[0_0_20px_rgba(22,163,74,0.6)]' : 'bg-red-600 border-red-400 shadow-[0_0_20px_rgba(220,38,38,0.6)]')
+        : 'bg-accent border-white/20';
+
     return (
         <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
             <AnimatePresence>
-                {/* Operands Flying In (Visible until Stage 1 complete or Stage 2 start) */}
-                {stage < 3 && operands.map((op, idx) => (
-                    <motion.div
-                        key={`op-${idx}`}
-                        initial={{ x: op.startPos.x, y: op.startPos.y, opacity: 0.5, scale: 0.8 }}
-                        animate={{
-                            x: meetingPoint.x + (idx === 0 ? -20 : 20), // Slight separation
-                            y: meetingPoint.y,
-                            opacity: stage >= 1 ? 0 : 1, // Fade out once they meet (replaced by intermediate result)
-                            scale: 1,
-                        }}
-                        transition={{ duration: 0.6, ease: "easeInOut" }}
-                        className="absolute flex flex-col items-center"
-                    >
-                        <div className="bg-theme-secondary/90 text-accent px-3 py-1 rounded-lg border border-accent shadow-lg backdrop-blur-md font-mono font-bold text-lg">
-                            {String(op.value)}
-                        </div>
-                        <div className="text-[10px] text-theme-secondary mt-1 font-bold bg-theme-main/80 px-1 rounded">
-                            {op.name}
-                        </div>
-                    </motion.div>
-                ))}
+                {/* Operands Flying In (Visible until Stage 1 complete) */}
+                {stage < 1 && operands.map((op, idx) => {
+                    const isVirtual = !op.startPos;
+                    // Handle virtual operands by determining a start position if missing
+                    const startPos = op.startPos || {
+                        x: meetingPoint.x + (idx === 0 ? -100 : 100), // Larger offset for dramatic fly-in
+                        y: meetingPoint.y
+                    };
+
+                    return (
+                        <motion.div
+                            key={`op-${idx}`}
+                            initial={{
+                                x: startPos.x,
+                                y: startPos.y,
+                                opacity: isVirtual ? 0 : 1, // Real vars visible immediately
+                                scale: isVirtual ? 0.8 : 1
+                            }}
+                            animate={{
+                                x: meetingPoint.x + (idx === 0 ? -60 : 60), // Increased separation from 20 to 60
+                                y: meetingPoint.y,
+                                opacity: 1,
+                                scale: 1,
+                            }}
+                            exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
+                            transition={{ duration: 0.6, ease: "easeInOut" }}
+                            className="absolute flex flex-col items-center"
+                        >
+                            <div className="bg-theme-secondary/90 text-accent px-3 py-1 rounded-lg border border-accent shadow-lg backdrop-blur-md font-mono font-bold text-lg">
+                                {String(op.value)}
+                            </div>
+                            <div className="text-[10px] text-theme-secondary mt-1 font-bold bg-theme-main/80 px-1 rounded">
+                                {op.name}
+                            </div>
+                        </motion.div>
+                    )
+                })}
 
                 {/* Operator Symbol */}
                 {stage < 1 && operator !== 'assign' && (
                     <motion.div
                         key="operator"
-                        initial={{ x: midX, y: midY, opacity: 0, scale: 0 }}
+                        initial={{ x: meetingPoint.x, y: meetingPoint.y, opacity: 0, scale: 0 }}
                         animate={{ x: meetingPoint.x, y: meetingPoint.y, opacity: 1, scale: 1.5 }}
+                        exit={{ opacity: 0, scale: 0 }}
                         transition={{ duration: 0.4, delay: 0.2 }}
                         className="absolute font-bold text-base text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]"
                     >
@@ -142,7 +195,8 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
                     </motion.div>
                 )}
 
-                {/* Intermediate Result (e.g. "8") */}
+                {/* Intermediate Result (e.g. '1') */}
+                {/* Visible from Stage 1 -> Fades out at Stage 3 when Final Result fades in */}
                 {stage >= 1 && stage < 3 && (
                     <motion.div
                         key="intermediate"
@@ -150,48 +204,50 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
                         animate={{
                             scale: 1.2,
                             opacity: 1,
-                            x: secondaryOperator ? (meetingPoint.x - 20) : meetingPoint.x // Shift left if showing secondary op
+                            x: secondaryOperator ? (meetingPoint.x - 40) : meetingPoint.x
                         }}
-                        exit={{ scale: 0.5, opacity: 0 }} // Fade out when transforming to final
-                        transition={{ duration: 0.3 }}
+                        exit={{ opacity: 0, scale: 0.8, y: meetingPoint.y - 20 }}
+                        transition={{ duration: 0.4 }}
                         className="absolute"
                     >
-                        <div className="bg-theme-tertiary/90 text-white px-3 py-1 rounded-lg border border-white/20 shadow-lg font-bold text-xl">
-                            {intermediateResult}
+                        <div className="text-white px-4 py-2 rounded-xl border-2 border-white/20 bg-accent shadow-2xl font-bold text-2xl">
+                            {String(intermediateResult).toUpperCase()}
                         </div>
                     </motion.div>
                 )}
 
-                {/* Secondary Operator (e.g. "/ 2") */}
+                {/* Secondary Operator (e.g. '== 0') */}
+                {/* Visible from Stage 2 -> Fades out at Stage 3 */}
                 {stage >= 2 && stage < 3 && secondaryOperator && (
                     <motion.div
                         key="secondary"
-                        initial={{ x: meetingPoint.x + 20, y: meetingPoint.y, opacity: 0, scale: 0.8 }}
+                        initial={{ x: meetingPoint.x + 30, y: meetingPoint.y, opacity: 0, scale: 0.8 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
+                        exit={{ opacity: 0, scale: 0.8, y: meetingPoint.y - 20 }}
                         transition={{ duration: 0.4 }}
-                        className="absolute font-mono text-lg text-accent font-bold bg-black/50 px-2 rounded ml-2"
+                        className="absolute font-mono text-xl text-white font-bold bg-white/10 border border-white/30 px-3 py-1 rounded-lg backdrop-blur-sm shadow-lg ml-2"
                     >
                         {secondaryOperator}
                     </motion.div>
                 )}
 
-                {/* Final Result Flying to Target */}
+                {/* Final Result (e.g. 'FALSE') - DISTINCT ELEMENT */}
+                {/* Fades in at Stage 3 (Evaluation Complete) */}
                 {stage >= 3 && (
                     <motion.div
-                        key="final"
-                        initial={{ x: meetingPoint.x, y: meetingPoint.y, scale: 1.2, opacity: 0 }} // Start invisible
+                        key="final-result"
+                        initial={{ x: meetingPoint.x, y: meetingPoint.y, scale: 0.8, opacity: 0 }}
                         animate={{
-                            x: target.endPos.x,
-                            y: target.endPos.y,
-                            scale: 0.5,
-                            opacity: [0, 1, 1, 0] // Fade in at start, then out at end
+                            x: (stage >= 4 && target) ? target.endPos.x : meetingPoint.x,
+                            y: (stage >= 4 && target) ? target.endPos.y : meetingPoint.y,
+                            scale: (stage >= 4 && target) ? 0.5 : 1.5, // Pop large then shrink if moving
+                            opacity: (stage >= 4 && target) ? [1, 1, 0] : 1
                         }}
-                        transition={{ duration: 0.8, ease: "easeInOut" }}
+                        transition={{ duration: 0.6, ease: "easeInOut" }}
                         className="absolute"
                     >
-                        <div className="bg-accent text-white px-4 py-2 rounded-xl shadow-[0_0_30px_var(--accent)] font-bold text-xl min-w-[60px] text-center border-2 border-white/20">
-                            {resultValue}
+                        <div className={`text-white px-4 py-2 rounded-xl border-2 shadow-2xl font-bold text-2xl ${resultColorClass}`}>
+                            {String(resultValue).toUpperCase()}
                         </div>
                     </motion.div>
                 )}

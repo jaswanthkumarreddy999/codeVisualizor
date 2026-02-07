@@ -20,6 +20,9 @@ interface UnifiedVisualizerProps {
     currentLine?: number;
     prevLine?: number;
     prevHeap?: Record<string, any>;
+    initialPositions?: Record<string, { x: number, y: number }>;
+    onPositionsChange?: (positions: Record<string, { x: number, y: number }>) => void;
+    onClearAll?: () => void;
 }
 
 export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
@@ -32,15 +35,25 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
     code,
     currentLine,
     prevLine,
-    prevHeap
+    prevHeap,
+    initialPositions,
+    onPositionsChange,
+    onClearAll
 }) => {
     const [selectedVar, setSelectedVar] = React.useState<string | null>(null);
     const [viewModes, setViewModes] = React.useState<Record<string, 'bar' | 'box' | 'stack'>>({});
     const [explicitPointers, setExplicitPointers] = React.useState<Record<string, string[]>>({});
     // Store absolute positions (x, y) relative to the container
-    const [positions, setPositions] = React.useState<Record<string, { x: number, y: number }>>({});
+    const [positions, setPositions] = React.useState<Record<string, { x: number, y: number }>>(initialPositions || {});
     // Store sizes (width, height)
     const [sizes, setSizes] = React.useState<Record<string, { width: number, height: number }>>({});
+
+    // Update positions if initialPositions changes (e.g. on load)
+    React.useEffect(() => {
+        if (initialPositions) {
+            setPositions(initialPositions);
+        }
+    }, [initialPositions]);
 
     // Auto-detect view mode for new variables
     React.useEffect(() => {
@@ -83,7 +96,10 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
         // 1. Check for average / complex pattern like: middle = (left + right) / 2
         // Capture the trailing operation in group 5
-        const complexRegex = /^([a-zA-Z_]\w*)\s*=\s*\(\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)\s*\)\s*(\/.*)$/;
+        // 1. Check for average / complex pattern like: middle = (left + right) / 2
+        // Capture the trailing operation in group 5
+        // Updated to handle optional type declaration prefix (e.g., "int middle = ...")
+        const complexRegex = /^(?:[\w\[\]<>]+\s+)?([a-zA-Z_]\w*)\s*=\s*\(\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)\s*\)\s*(\/.*)$/;
         match = lineContent.match(complexRegex);
 
         if (match) {
@@ -96,7 +112,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
             explicitResult = heap?.[targetName];
         } else {
             // 2. Standard binary assignment: c = a + b
-            const assignmentRegex = /^([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)/;
+            const assignmentRegex = /^(?:[\w\[\]<>]+\s+)?([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*([\+\-\*\/])\s*([a-zA-Z_]\w*)/;
             match = lineContent.match(assignmentRegex);
 
             if (match) {
@@ -109,49 +125,128 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     targetName = match[1]; operator = match[2]; op2Name = match[3]; op1Name = targetName;
                 } else {
                     // 4. Simple Assignment: neutral = n
-                    const simpleAssignRegex = /^([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*;?$/;
+                    const simpleAssignRegex = /^(?:[\w\[\]<>]+\s+)?([a-zA-Z_]\w*)\s*=\s*([a-zA-Z_]\w*)\s*;?$/;
                     match = lineContent.match(simpleAssignRegex);
                     if (match) {
                         targetName = match[1];
                         op1Name = match[2];
                         operator = 'assign';
+                    } else {
+                        // 5. Condition Check: if (a < b) or if (num % 2 == 0)
+                        // Relaxed regex to allow trailing content (e.g. single line if)
+                        const conditionRegex = /^\s*(?:if|while)\s*\(\s*(.+?)\s*\)/;
+                        match = lineContent.match(conditionRegex);
+                        if (match) {
+                            const innerC = match[1];
+
+                            // 5a. Check for Modulo/Complex: num % 2 == 0
+                            const moduloRegex = /([a-zA-Z_]\w*)\s*(%)\s*(\d+|[a-zA-Z_]\w*)\s*(==|!=)\s*(\d+|[a-zA-Z_]\w*)/;
+                            const modMatch = innerC.match(moduloRegex);
+
+                            if (modMatch) {
+                                op1Name = modMatch[1];
+                                operator = modMatch[2]; // %
+                                op2Name = modMatch[3];  // Divisor (e.g. 2)
+                                secondaryOperator = `${modMatch[4]} ${modMatch[5]}`; // == 0
+
+                                // Compute explicit result for modulo
+                                const val1 = heap[op1Name];
+                                const val2 = isNaN(Number(op2Name)) ? heap[op2Name] : Number(op2Name);
+                                const checkVal = isNaN(Number(modMatch[5])) ? heap[modMatch[5]] : Number(modMatch[5]);
+
+                                if (val1 !== undefined && val2 !== undefined) {
+                                    const modResult = val1 % val2;
+                                    const comparator = modMatch[4];
+                                    if (comparator === '==') explicitResult = (modResult == checkVal);
+                                    else if (comparator === '!=') explicitResult = (modResult != checkVal);
+                                }
+                            } else {
+                                // 5b. Standard Binary: a < b or a < 5
+                                const binaryOpRegex = /^(?:[\w\[\]<>]+\s+)?([a-zA-Z_]\w*)\s*(==|!=|<=|>=|<|>)\s*(\d+|[a-zA-Z_]\w*)/;
+                                const innerMatch = innerC.match(binaryOpRegex);
+                                if (innerMatch) {
+                                    op1Name = innerMatch[1];
+                                    operator = innerMatch[2];
+                                    op2Name = innerMatch[3];
+
+                                    // Compute result if op2 is literal
+                                    if (!isNaN(Number(op2Name))) {
+                                        const val1 = heap[op1Name];
+                                        const val2 = Number(op2Name);
+                                        if (val1 !== undefined) {
+                                            switch (operator) {
+                                                case '==': explicitResult = (val1 == val2); break;
+                                                case '!=': explicitResult = (val1 != val2); break;
+                                                case '<': explicitResult = (val1 < val2); break;
+                                                case '>': explicitResult = (val1 > val2); break;
+                                                case '<=': explicitResult = (val1 <= val2); break;
+                                                case '>=': explicitResult = (val1 >= val2); break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        if (targetName && op1Name && (op2Name || operator === 'assign') && operator) {
-            const op1Pos = positions[op1Name];
-            const op2Pos = op2Name ? positions[op2Name] : undefined;
-            const targetPos = positions[targetName];
+        // Check if it's a condition/comparison operator (including modulo for animation purposes)
+        const isCondition = ['==', '!=', '<', '>', '<=', '>=', '%'].includes(operator);
 
-            // Helper to get center
-            const getCenter = (name: string, pos: { x: number, y: number }) => {
-                const size = sizes[name] || (
-                    // Fallback to default check logic if size not set yet (though useEffect handles it)
-                    (Array.isArray(prevHeap[name]) || (prevHeap[name] && typeof prevHeap[name] === 'object' && 'left' in prevHeap[name]))
-                        ? { width: 600, height: 500 }
-                        : { width: 150, height: 120 }
-                );
-                return {
-                    x: pos.x + size.width / 2,
-                    y: pos.y + size.height / 2
-                };
+        const op1Pos = positions[op1Name];
+        const op2Pos = op2Name ? positions[op2Name] : undefined;
+        const targetPos = targetName ? positions[targetName] : undefined;
+
+        // Helper to get center
+        const getCenter = (name: string, pos: { x: number, y: number }) => {
+            const size = sizes[name] || (
+                // Fallback to default check logic if size not set yet (though useEffect handles it)
+                (Array.isArray(prevHeap[name]) || (prevHeap[name] && typeof prevHeap[name] === 'object' && 'left' in prevHeap[name]))
+                    ? { width: 600, height: 500 }
+                    : { width: 150, height: 120 }
+            );
+            return {
+                x: pos.x + size.width / 2,
+                y: pos.y + size.height / 2
             };
+        };
 
-            if (op1Pos && (op2Pos || operator === 'assign') && targetPos) {
-                const operands = [
-                    { name: op1Name, value: prevHeap[op1Name], startPos: getCenter(op1Name, op1Pos) }
-                ];
+        // Allow animation if op1 exists OR if it's a condition check (even if op1 hidden)
+        // For assignments, we still typically want at least op1 visible to animate "from" somewhere.
+        // But for conditions, we want the result to show up regardless.
+        // UPDATE: User wants animation ONLY if at least one variable is present on canvas.
+        // Literal operands don't have positions, so checking (op1Pos || op2Pos) ensures at least one REAL variable is visualized.
+        if (op1Pos || op2Pos) {
+            const operands = [];
 
-                if (op2Name && op2Pos) {
+            // Add Op1
+            if (op1Pos) {
+                operands.push({ name: op1Name, value: prevHeap[op1Name], startPos: getCenter(op1Name, op1Pos) });
+            } else if (isCondition) {
+                // Virtual Op1
+                operands.push({ name: op1Name, value: prevHeap[op1Name] });
+            }
+
+            // Add Op2 if exists
+            if (op2Name) {
+                if (op2Pos) {
                     operands.push({ name: op2Name, value: prevHeap[op2Name], startPos: getCenter(op2Name, op2Pos) });
+                } else if (isCondition) {
+                    // Virtual Op2 (could be variable or literal)
+                    const val = (op2Name && !isNaN(Number(op2Name))) ? Number(op2Name) : prevHeap[op2Name];
+                    operands.push({ name: op2Name, value: val });
                 }
+            }
 
+            // If it's a condition, we proceed if we have at least one operand (virtual or real)
+            // If it's assignment, we ensured op1Pos exists above.
+            if (operands.length > 0) {
                 return {
                     operands,
                     operator,
-                    target: { name: targetName, endPos: getCenter(targetName, targetPos) },
+                    target: targetName && targetPos ? { name: targetName, endPos: getCenter(targetName, targetPos) } : undefined,
                     explicitResult,
                     secondaryOperator
                 };
@@ -162,7 +257,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
     // Derived overrides
     const currentOverrideValues = React.useMemo(() => {
-        if (activeAnim && prevHeap) {
+        if (activeAnim && activeAnim.target && prevHeap) {
             return { [activeAnim.target.name]: prevHeap[activeAnim.target.name] };
         }
         return {};
@@ -242,10 +337,13 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         const newX = (elementRect.left - containerRect.left) + container.scrollLeft - paddingLeft;
         const newY = (elementRect.top - containerRect.top) + container.scrollTop - paddingTop;
 
-        setPositions(prev => ({
-            ...prev,
+        const newPositions = {
+            ...positions,
             [name]: { x: newX, y: newY }
-        }));
+        };
+
+        setPositions(newPositions);
+        onPositionsChange?.(newPositions);
     };
 
     const handleDragOver = (e: React.DragEvent) => {
@@ -327,6 +425,17 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                 </div>
             )}
 
+            {/* Clear All Button */}
+            {visualizedVariables.length > 0 && onClearAll && (
+                <button
+                    onClick={(e) => { e.stopPropagation(); onClearAll(); }}
+                    className="absolute top-4 right-4 z-50 bg-theme-tertiary hover:bg-red-500/20 hover:text-red-500 text-theme-secondary border border-theme hover:border-red-500/50 rounded-lg px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-2 shadow-lg backdrop-blur-sm"
+                    title="Clear All Visualizations"
+                >
+                    <span>Clear Canvas</span>
+                </button>
+            )}
+
             {visualizedVariables.map(varName => {
                 const heapValue = heap[varName];
                 // Apply overrides if animation is active for this variable
@@ -364,7 +473,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             value={value}
                             onRemove={() => onRemoveVariable(varName)}
                             selected={selectedVar === varName}
-                            suppressAnimation={!!(activeAnim && activeAnim.target.name === varName)}
+                            suppressAnimation={!!(activeAnim && activeAnim.target && activeAnim.target.name === varName)}
                         />
                     );
                     ContainerClasses = BaseClasses;

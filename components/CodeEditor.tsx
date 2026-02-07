@@ -10,16 +10,25 @@ interface CodeEditorProps {
     onLanguageChange: (lang: 'typescript' | 'python' | 'java' | 'c' | 'cpp') => void;
     onChange: (value: string | undefined) => void;
     highlightedLine?: number;
+    conditionResult?: boolean | null; // true = pass (green), false = fail (red), null/undefined = normal
     isDarkMode: boolean;
 }
 
-export const CodeEditor: React.FC<CodeEditorProps> = ({ code, language, onLanguageChange, onChange, highlightedLine, isDarkMode }) => {
+export const CodeEditor: React.FC<CodeEditorProps> = ({ code, language, onLanguageChange, onChange, highlightedLine, conditionResult, isDarkMode }) => {
     const editorRef = React.useRef<any>(null);
     const decorationsRef = React.useRef<string[]>([]);
     const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
 
     React.useEffect(() => {
         if (editorRef.current && highlightedLine) {
+            let className = 'current-line-highlight';
+
+            if (conditionResult === true) {
+                className = 'condition-pass-highlight';
+            } else if (conditionResult === false) {
+                className = 'condition-fail-highlight';
+            }
+
             decorationsRef.current = editorRef.current.deltaDecorations(
                 decorationsRef.current,
                 [
@@ -32,7 +41,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, language, onLangua
                         },
                         options: {
                             isWholeLine: true,
-                            className: 'current-line-highlight', // CSS class for highlighting
+                            className: className,
                         },
                     },
                 ]
@@ -41,7 +50,8 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ code, language, onLangua
         } else if (editorRef.current && !highlightedLine) {
             decorationsRef.current = editorRef.current.deltaDecorations(decorationsRef.current, []);
         }
-    }, [highlightedLine]);
+    }, [highlightedLine, conditionResult]);
+
 
     return (
         <div className="w-full h-full flex flex-col border-r border-theme">

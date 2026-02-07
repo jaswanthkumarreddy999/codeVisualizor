@@ -7,65 +7,20 @@ import { Timeline } from '@/components/Timeline';
 import { WatchWindow } from '@/components/WatchWindow';
 import { instrument } from '@/lib/engine/instrumenter';
 import { ExecutionEngine, StateSnapshot } from '@/lib/engine/state-machine';
-import { ProjectManager, SavedProject } from '@/components/ProjectManager';
+import { ProjectManager } from '@/components/ProjectManager';
+import { SavedProject } from '@/types/Project';
 
 import { Play, Zap, FileCode, Cpu, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from 'lucide-react';
 
-const DEFAULT_TS_CODE = `// Trapping Rain Water (Visualized)
-let height = [4, 2, 0, 3, 2, 5];
-let n = height.length;
-let leftMax = 0, rightMax = 0;
-let waterLevels = new Array(n).fill(0); // For visualization
-
-let i = 0, j = n - 1;
-
-while (i <= j) {
-    if (height[i] < height[j]) {
-        if (height[i] >= leftMax) {
-            leftMax = height[i];
-        } else {
-            waterLevels[i] = leftMax - height[i]; // Store trapped water
-        }
-        i++;
-    } else {
-        if (height[j] >= rightMax) {
-            rightMax = height[j];
-        } else {
-            waterLevels[j] = rightMax - height[j]; // Store trapped water
-        }
-        j--;
-    }
-}
+const DEFAULT_TS_CODE = `console.log("Hello, TypeScript!");
 `;
 
-const DEFAULT_PYTHON_CODE = `# Trapping Rain Water (Visualized)
-height = [4, 2, 0, 3, 2, 5]
-n = len(height)
-left_max = 0
-right_max = 0
-water_levels = [0] * n # For visualization
-
-i = 0
-j = n - 1
-
-while i <= j:
-    if height[i] < height[j]:
-        if height[i] >= left_max:
-            left_max = height[i]
-        else:
-            water_levels[i] = left_max - height[i] # Store trapped water
-        i += 1
-    else:
-        if height[j] >= right_max:
-            right_max = height[j]
-        else:
-            water_levels[j] = right_max - height[j] # Store trapped water
-        j -= 1
+const DEFAULT_PYTHON_CODE = `print("Hello, Python!")
 `;
 
 const DEFAULT_JAVA_CODE = `public class Main {
     public static void main(String[] args) {
-        System.out.println("Hello from Java!");
+        System.out.println("Hello, Java!");
     }
 }
 `;
@@ -73,33 +28,39 @@ const DEFAULT_JAVA_CODE = `public class Main {
 const DEFAULT_C_CODE = `#include <stdio.h>
 
 int main() {
-    int count = 5;
-    printf("Starting C program\\n");
-    for (int i = 0; i < count; i++) {
-        printf("Count: %d\\n", i);
-    }
+    printf("Hello, C!\\n");
     return 0;
 }
 `;
 
 const DEFAULT_CPP_CODE = `#include <iostream>
-#include <vector>
 
 int main() {
-    std::cout << "Hello from C++!" << std::endl;
-    int a = 10;
-    int b = 20;
-    std::cout << "Sum: " << (a + b) << std::endl;
+    std::cout << "Hello, C++!" << std::endl;
     return 0;
 }
 `;
 
 // Helper to hydrate Backend (Python/Java) history to JS StateSnapshot
 function hydrateBackendHistory(history: any[]): StateSnapshot[] {
-  return history.map(step => {
-    const { roots, store, line } = step;
+  return history.map((step, idx) => {
+    const { store, line, stack } = step;
+    let { roots } = step;
     const heap: Record<string, any> = {};
     const cache = new Map<string, any>();
+
+    // Patch: If the current step is inside 'traceCondition' (instrumentation),
+    // map the line number back to the caller (the user's code) to avoid jumping loops/scopes.
+    let effectiveLine = line;
+    if (Array.isArray(stack) && stack.length > 0 && stack[0].name === 'traceCondition') {
+      if (stack.length > 1) {
+        effectiveLine = stack[1].line;
+      }
+      // Also use the previous step's roots to show caller variables instead of traceCondition's local vars
+      if (idx > 0) {
+        roots = history[idx - 1].roots;
+      }
+    }
 
     const resolve = (val: any): any => {
       if (!val) return val;
@@ -147,14 +108,16 @@ function hydrateBackendHistory(history: any[]): StateSnapshot[] {
     };
 
     for (const [key, val] of Object.entries(roots)) {
+      if (key.startsWith('__viz')) continue;
       heap[key] = resolve(val);
     }
 
     return {
       heap,
-      stack: step.stack || {}, // Hydrate stack from step
-      line,
-      description: `Line ${line}`
+      stack: stack || {}, // Hydrate stack from step
+      line: effectiveLine,
+      description: `Line ${effectiveLine}`,
+      conditionResult: step.conditionResult
     };
   });
 }
@@ -168,6 +131,7 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [visualizedVariables, setVisualizedVariables] = useState<string[]>([]);
   const [ignoredPointers, setIgnoredPointers] = useState<Record<string, string[]>>({});
+  const [visualizerPositions, setVisualizerPositions] = useState<Record<string, { x: number, y: number }>>({});
   const [playbackSpeed, setPlaybackSpeed] = useState(500);
 
   // IO State
@@ -186,10 +150,13 @@ export default function Home() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isIOCollapsed, setIsIOCollapsed] = useState(false);
   const [isWatchCollapsed, setIsWatchCollapsed] = useState(false);
+  const [isInputCollapsed, setIsInputCollapsed] = useState(false);
+  const [isOutputCollapsed, setIsOutputCollapsed] = useState(false);
 
   // Ref to store previous widths before collapse
   const prevEditorWidth = React.useRef(33.33);
   const prevWatchWidth = React.useRef(320);
+  const prevInputWidth = React.useRef(50);
 
   const toggleSidebar = () => {
     if (isSidebarCollapsed) {
@@ -259,6 +226,36 @@ export default function Home() {
     localStorage.setItem('visualizer-accent', accentColor);
   }, [themeMode, accentColor]);
 
+  // Save State Persistence
+  useEffect(() => {
+    const stateToSave = {
+      code,
+      language,
+      visualizedVariables,
+      ignoredPointers,
+      visualizerPositions,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('visualizer-current-state', JSON.stringify(stateToSave));
+  }, [code, language, visualizedVariables, ignoredPointers, visualizerPositions]);
+
+  // Load State Persistence
+  useEffect(() => {
+    const savedState = localStorage.getItem('visualizer-current-state');
+    if (savedState) {
+      try {
+        const parsed = JSON.parse(savedState);
+        if (parsed.code) setCode(parsed.code);
+        if (parsed.language) setLanguage(parsed.language);
+        if (parsed.visualizedVariables) setVisualizedVariables(parsed.visualizedVariables);
+        if (parsed.ignoredPointers) setIgnoredPointers(parsed.ignoredPointers);
+        if (parsed.visualizerPositions) setVisualizerPositions(parsed.visualizerPositions);
+      } catch (e) {
+        console.error("Failed to load saved state", e);
+      }
+    }
+  }, []);
+
   // Update CodeEditor isDarkMode prop based on theme
   const isEditorDark = themeMode === 'dark';
 
@@ -293,6 +290,11 @@ export default function Home() {
     }
     setVisualizedVariables(project.visualizedVariables);
     setIgnoredPointers(project.ignoredPointers);
+    if (project.positions) {
+      setVisualizerPositions(project.positions);
+    } else {
+      setVisualizerPositions({});
+    }
     setHistory([]);
     setCurrentStepIndex(0);
   };
@@ -375,7 +377,10 @@ export default function Home() {
         } else {
           setOutputVal(data.stdout || '');
           if (data.stderr) {
-            setOutputVal(prev => prev + '\nStderr:\n' + data.stderr);
+            const cleanStderr = data.stderr.replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
+            if (cleanStderr) {
+              setOutputVal(prev => prev + '\nStderr:\n' + cleanStderr);
+            }
           }
 
           if (data.history && (language === 'java' || language === 'c' || language === 'cpp')) {
@@ -457,6 +462,12 @@ export default function Home() {
     };
   }, [isResizingEditor, isResizingWatch, isResizingCodeEditorHeight, isResizingInputWidth, editorWidth]);
 
+  const handleClearAll = () => {
+    setVisualizedVariables([]);
+    setVisualizerPositions({});
+    setIgnoredPointers({});
+  };
+
   const currentSnapshot = history[currentStepIndex] || { heap: {}, stack: {}, line: 0, description: 'Initialization' };
 
   return (
@@ -487,6 +498,7 @@ export default function Home() {
             currentLanguage={language}
             currentVisualizedVars={visualizedVariables}
             currentIgnoredPointers={ignoredPointers}
+            currentPositions={visualizerPositions}
             onLoadProject={handleLoadProject}
           />
 
@@ -581,13 +593,14 @@ export default function Home() {
             </button>
 
             {/* Top Half: Code Editor */}
-            <div style={{ height: isIOCollapsed ? '100%' : `${codeEditorHeight}%` }} className="relative font-mono text-[13px] border-b border-theme shrink-0 transition-all duration-300">
+            <div style={{ height: isIOCollapsed ? 'calc(100% - 48px)' : `${codeEditorHeight}%` }} className="relative font-mono text-[13px] border-b border-theme shrink-0 transition-all duration-300">
               <CodeEditor
                 code={code}
                 language={language}
                 onLanguageChange={handleLanguageChange}
                 onChange={(v) => setCode(v || '')}
                 highlightedLine={currentSnapshot.line}
+                conditionResult={currentSnapshot.conditionResult}
                 isDarkMode={isEditorDark}
               />
 
@@ -605,53 +618,136 @@ export default function Home() {
             </div>
 
             {/* Bottom Half: Input/Output */}
-            <div className={`flex flex-col bg-theme-main min-h-0 transition-all duration-300 ${isIOCollapsed ? 'h-8 shrink-0 overflow-hidden' : 'flex-grow'}`}>
+            <div className={`flex flex-col bg-theme-main min-h-0 transition-all duration-300 ${isIOCollapsed ? 'h-12 shrink-0' : 'flex-grow'}`}>
               {/* Tabs / Header */}
-              <div className="flex border-b border-theme shrink-0 bg-theme-tertiary/50 relative">
-                <div
-                  style={{ width: `${inputWidth}%` }}
-                  className="px-4 py-2 text-xs font-bold text-theme-secondary border-r border-theme transition-all flex justify-between items-center"
-                >
-                  INPUT
-                </div>
-                <div className="flex-grow px-4 py-2 text-xs font-bold text-theme-secondary flex justify-between items-center">
-                  OUTPUT
+              <div className={`flex shrink-0 relative ${isIOCollapsed ? 'h-full bg-accent/10 border-t-2 border-accent' : 'border-b border-theme bg-theme-tertiary/50'}`}>
+                {isIOCollapsed ? (
+                  /* Collapsed state - show prominent expand bar */
                   <button
-                    onClick={() => setIsIOCollapsed(!isIOCollapsed)}
-                    className="hover:text-accent transition-colors"
+                    onClick={() => setIsIOCollapsed(false)}
+                    className="flex-grow px-4 text-sm font-bold text-theme-primary flex items-center justify-center gap-4 hover:bg-accent/20 transition-colors group"
                   >
-                    {isIOCollapsed ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+                    <ChevronUp size={18} className="text-accent animate-bounce" />
+                    <span>INPUT / OUTPUT</span>
+                    <span className="text-accent text-xs">— Click to expand —</span>
+                    <Maximize2 size={16} className="text-accent" />
                   </button>
-                </div>
+                ) : (
+                  /* Expanded state - show input/output tabs */
+                  <>
+                    <div
+                      style={{ width: `${inputWidth}%` }}
+                      className="px-4 py-2 text-xs font-bold text-theme-secondary border-r border-theme transition-all flex justify-between items-center"
+                    >
+                      INPUT
+                    </div>
+                    <div className="flex-grow px-4 py-2 text-xs font-bold text-theme-secondary flex justify-between items-center">
+                      OUTPUT
+                      <button
+                        onClick={() => setIsIOCollapsed(true)}
+                        className="hover:text-accent transition-colors flex items-center gap-1"
+                        title="Collapse Input/Output"
+                      >
+                        <ChevronDown size={14} />
+                        <Minimize2 size={12} />
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
 
-              <div className="flex-grow flex min-h-0 relative">
-                {/* Input Area */}
-                <div style={{ width: `${inputWidth}%` }} className="h-full border-r border-theme relative shrink-0">
-                  <textarea
-                    className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
-                    placeholder="Enter input for your code here..."
-                    value={inputVal}
-                    onChange={(e) => setInputVal(e.target.value)}
-                  />
+              {!isIOCollapsed && (
+                <div className="flex-grow flex min-h-0 relative">
+                  {/* Input Area */}
+                  {!isInputCollapsed ? (
+                    <div
+                      style={{ width: isOutputCollapsed ? '100%' : `${inputWidth}%` }}
+                      className="h-full border-r border-theme relative shrink-0 transition-all duration-300"
+                    >
+                      <textarea
+                        className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
+                        placeholder="Enter input for your code here..."
+                        value={inputVal}
+                        onChange={(e) => setInputVal(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    /* Collapsed Input - Show expand button */
+                    <button
+                      onClick={() => setIsInputCollapsed(false)}
+                      className="w-10 h-full bg-accent/10 hover:bg-accent/20 border-r-2 border-accent flex flex-col items-center justify-center shrink-0 cursor-pointer transition-colors group"
+                      title="Expand Input"
+                    >
+                      <ChevronRight size={16} className="text-accent group-hover:scale-110 transition-transform" />
+                      <div className="mt-2 [writing-mode:vertical-rl] rotate-180 text-xs font-bold text-accent uppercase tracking-wider">
+                        INPUT
+                      </div>
+                    </button>
+                  )}
 
-                  {/* Width Resize Handle */}
-                  <div
-                    className="absolute top-0 bottom-0 right-0 w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100"
-                    onMouseDown={() => setIsResizingInputWidth(true)}
-                  />
-                </div>
+                  {/* Resize Handle with Bi-directional Arrows */}
+                  {!isInputCollapsed && !isOutputCollapsed && (
+                    <div
+                      className="w-1 cursor-col-resize hover:bg-accent active:bg-accent z-10 transition-colors delay-100 relative shrink-0"
+                      onMouseDown={() => setIsResizingInputWidth(true)}
+                    >
+                      {/* Collapse Buttons Container - Centered on divider */}
+                      <div className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 flex gap-0.5 z-20">
+                        {/* Collapse Input (Left Arrow) */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            prevInputWidth.current = inputWidth;
+                            setIsInputCollapsed(true);
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="w-5 h-5 bg-theme-tertiary border border-theme rounded-l-full flex items-center justify-center hover:bg-accent text-theme-secondary hover:text-white transition-colors shadow-sm"
+                          title="Collapse Input"
+                        >
+                          <ChevronLeft size={12} />
+                        </button>
+                        {/* Collapse Output (Right Arrow) */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            prevInputWidth.current = inputWidth;
+                            setIsOutputCollapsed(true);
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className="w-5 h-5 bg-theme-tertiary border border-theme rounded-r-full flex items-center justify-center hover:bg-accent text-theme-secondary hover:text-white transition-colors shadow-sm"
+                          title="Collapse Output"
+                        >
+                          <ChevronRight size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-                {/* Output Area */}
-                <div className="flex-grow h-full relative bg-theme-secondary/5 min-w-0">
-                  <textarea
-                    readOnly
-                    className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
-                    placeholder="Output will appear here..."
-                    value={outputVal}
-                  />
+                  {/* Output Area */}
+                  {!isOutputCollapsed ? (
+                    <div className="flex-grow h-full relative bg-theme-secondary/5 min-w-0 transition-all duration-300">
+                      <textarea
+                        readOnly
+                        className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
+                        placeholder="Output will appear here..."
+                        value={outputVal}
+                      />
+                    </div>
+                  ) : (
+                    /* Collapsed Output - Show expand button */
+                    <button
+                      onClick={() => setIsOutputCollapsed(false)}
+                      className="w-10 h-full bg-accent/10 hover:bg-accent/20 border-l-2 border-accent flex flex-col items-center justify-center shrink-0 cursor-pointer transition-colors group"
+                      title="Expand Output"
+                    >
+                      <ChevronLeft size={16} className="text-accent group-hover:scale-110 transition-transform" />
+                      <div className="mt-2 [writing-mode:vertical-rl] rotate-180 text-xs font-bold text-accent uppercase tracking-wider">
+                        OUTPUT
+                      </div>
+                    </button>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Resize Handle (For Editor Width) */}
@@ -706,6 +802,9 @@ export default function Home() {
                 currentLine={currentSnapshot.line}
                 prevLine={history[currentStepIndex - 1]?.line}
                 prevHeap={history[currentStepIndex - 1]?.heap}
+                initialPositions={visualizerPositions}
+                onPositionsChange={setVisualizerPositions}
+                onClearAll={handleClearAll}
               />
             </div>
 
