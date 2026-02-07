@@ -278,11 +278,14 @@ ${processedScript}
             // Also need to allow JDI access if needed, but Tracer is standard java program. 
             // However, Tracer USES com.sun.jdi which is in the JDK.
 
-            // Add memory limits via environment variable which applies to both Tracer and Child VM
-            // Added --enable-preview to support unnamed classes
-            const child = exec(`java -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, {
+            // We unset JAVA_TOOL_OPTIONS to prevent "Picked up ..." message from interfering with JDI handshake
+            // Memory limit is passed directly to the Tracer process via -Xmx64m
+            const env = { ...process.env };
+            delete env.JAVA_TOOL_OPTIONS;
+
+            const child = exec(`java -Xmx64m -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, {
                 timeout: 10000,
-                env: { ...process.env, JAVA_TOOL_OPTIONS: '-Xmx64m' }
+                env
             }, (error, stdout, stderr) => {
                 const cleanStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
                 resolve({ stdout: stdout as string, stderr: cleanStderr });

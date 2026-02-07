@@ -114,7 +114,7 @@ public class Tracer {
         arguments.get("main").setValue(mainClass);
         // Use the current classpath for the target VM so it can find the user class
         String currentCp = System.getProperty("java.class.path");
-        arguments.get("options").setValue("-cp \"" + currentCp + "\"");
+        arguments.get("options").setValue("-cp \"" + currentCp + "\" -Xmx64m");
         return launchingConnector.launch(arguments);
     }
 
