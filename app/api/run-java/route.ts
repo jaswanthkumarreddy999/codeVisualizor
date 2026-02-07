@@ -337,6 +337,7 @@ ${processedScript}
                     }
 
                     // --- 2. Tracer Process ---
+                    // Wait longer for JDWP to initialize (1500ms) to avoid "Connection refused"
                     setTimeout(() => {
                         const tracerEnv = { ...process.env };
                         delete tracerEnv.JAVA_TOOL_OPTIONS;
@@ -353,14 +354,15 @@ ${processedScript}
                                 processed = true;
                                 // Check for specific failure in stderr to trigger retry
                                 if (userStderr.includes("handshake failed") || tracerStderr.includes("Connection refused")) {
-                                    reject(new Error("Handshake failed or Connection refused"));
+                                    const errorMsg = `Handshake failed on port ${port}. UserStderr: ${userStderr}, TracerStderr: ${tracerStderr}`;
+                                    reject(new Error(errorMsg));
                                     return;
                                 }
 
                                 resolve({ stdout: userStdout, stderr: userStderr, tracerJson: tracerStdout });
                             }
                         });
-                    }, 500);
+                    }, 1500);
                 });
 
                 // If we got here, success!
