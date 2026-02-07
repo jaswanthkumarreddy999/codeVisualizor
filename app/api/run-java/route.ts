@@ -282,113 +282,116 @@ ${processedScript}
         const tracerClassPath = join(process.cwd(), 'lib/java');
         const sep = process.platform === 'win32' ? ';' : ':';
 
-        // Pick a random port (simple approach for now)
-        const port = Math.floor(Math.random() * (40000 - 30000 + 1) + 30000).toString();
+        // Robust retry mechanism for port selection and execution
+        let attempts = 0;
+        const maxAttempts = 3;
 
-        await logDebug(`[${id}] Starting Java execution on port ${port}`);
-        await logDebug(`[${id}] ClassPath: ${classPath}`);
-        await logDebug(`[${id}] TracerPath: ${tracerClassPath}`);
+        while (attempts < maxAttempts) {
+            attempts++;
+            // Pick a random port (simple approach for now)
+            const port = Math.floor(Math.random() * (40000 - 30000 + 1) + 30000).toString();
 
-        const { stdout, stderr, tracerJson } = await new Promise<{ stdout: string, stderr: string, tracerJson?: string }>((resolve, reject) => {
-            let userStdout = '';
-            let userStderr = '';
-            let tracerStdout = '';
-            let tracerStderr = '';
-            let processed = false;
+            await logDebug(`[${id}] Starting Java execution on port ${port} (Attempt ${attempts})`);
+            await logDebug(`[${id}] ClassPath: ${classPath}`);
+            await logDebug(`[${id}] TracerPath: ${tracerClassPath}`);
 
-            // --- 1. User Process ---
-            // java -agentlib:... -cp ... Main
-            const userEnv = { ...process.env };
-            // Unset tool options for user process to allow clean output
-            delete userEnv.JAVA_TOOL_OPTIONS;
-            delete userEnv._JAVA_OPTIONS;
+            try {
+                const { stdout, stderr, tracerJson } = await new Promise<{ stdout: string, stderr: string, tracerJson?: string }>((resolve, reject) => {
+                    // ... check for specific handshake error to reject and retry ...
+                    // ACTUALLY, simpler to just let it fail and retry the whole block if tracer exit code is bad?
+                    // But exec callback doesn't give clean exit code here easily without more refactoring.
+                    // Let's rely on the stderr detection.
 
-            // Construct command
-            // WE USE 127.0.0.1 explicit IP to match Tracer
-            const agentLib = `-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:${port}`;
-            // Add memory limit
-            const memLimit = '-Xmx64m';
+                    let userStdout = '';
+                    let userStderr = '';
+                    let tracerStdout = '';
+                    let tracerStderr = '';
+                    let processed = false;
+                    let parsedOutput = false;
 
-            // Allow preview features if needed, but keeping it simple for now
-            const userChild = exec(`java ${memLimit} ${agentLib} -cp "${tracerClassPath}${sep}${classPath}" Main`, {
-                timeout: 10000,
-                env: userEnv
-            }, (error, stdout, stderr) => {
-                // User process finished
-                userStdout = stdout as string;
-                // Clean up stderr if needed
-                userStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
+                    // --- 1. User Process ---
+                    const userEnv = { ...process.env };
+                    delete userEnv.JAVA_TOOL_OPTIONS;
+                    delete userEnv._JAVA_OPTIONS;
 
-                // If tracer hasn't finished yet (unlikely if user process died, but possible),
-                // we mainly wait for tracer to output JSON. 
-                // However, if user process dies, tracer usually gets VMDisconnect event and finishes too.
-            });
+                    const agentLib = `-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:${port}`;
+                    const memLimit = '-Xmx64m';
 
-            if (input && userChild.stdin) {
-                userChild.stdin.write(input);
-                userChild.stdin.end();
-            }
+                    const userChild = exec(`java ${memLimit} ${agentLib} -cp "${tracerClassPath}${sep}${classPath}" Main`, {
+                        timeout: 10000,
+                        env: userEnv
+                    }, (error, stdout, stderr) => {
+                        userStdout = stdout as string;
+                        userStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
+                        // If we see the handshake failure, we should probably fail this attempt hard so we retry.
+                        if (userStderr.includes("Debugger failed to attach: handshake failed")) {
+                            // This will be caught by the outer try-catch if we reject? 
+                            // But we are inside a callback.
+                            console.error(`[${id}] Handshake failed on port ${port}`);
+                        }
+                    });
 
-            // --- 2. Tracer Process ---
-            // Wait a bit for User Process to initialize and open port?
-            setTimeout(() => {
-                const tracerEnv = { ...process.env };
-                delete tracerEnv.JAVA_TOOL_OPTIONS;
-                delete tracerEnv._JAVA_OPTIONS;
-
-                // Add --add-modules jdk.jdi to ensure runtime access
-                const tracerChild = exec(`java --add-modules jdk.jdi -cp "${tracerClassPath}${sep}${classPath}" Tracer ${port} Main`, {
-                    timeout: 10000,
-                    env: tracerEnv
-                }, (error, stdout, stderr) => {
-                    tracerStdout = stdout as string;
-                    tracerStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
-
-                    if (!processed) {
-                        processed = true;
-                        // Combine results
-                        logDebug(`[${id}] User Stdout: ${userStdout}`);
-                        logDebug(`[${id}] User Stderr: ${userStderr}`);
-                        logDebug(`[${id}] Tracer Stdout: ${tracerStdout}`);
-                        logDebug(`[${id}] Tracer Stderr: ${tracerStderr}`);
-                        resolve({ stdout: userStdout, stderr: userStderr, tracerJson: tracerStdout });
+                    if (input && userChild.stdin) {
+                        userChild.stdin.write(input);
+                        userChild.stdin.end();
                     }
+
+                    // --- 2. Tracer Process ---
+                    setTimeout(() => {
+                        const tracerEnv = { ...process.env };
+                        delete tracerEnv.JAVA_TOOL_OPTIONS;
+                        delete tracerEnv._JAVA_OPTIONS;
+
+                        const tracerChild = exec(`java --add-modules jdk.jdi -cp "${tracerClassPath}${sep}${classPath}" Tracer ${port} Main`, {
+                            timeout: 10000,
+                            env: tracerEnv
+                        }, (error, stdout, stderr) => {
+                            tracerStdout = stdout as string;
+                            tracerStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
+
+                            if (!processed) {
+                                processed = true;
+                                // Check for specific failure in stderr to trigger retry
+                                if (userStderr.includes("handshake failed") || tracerStderr.includes("Connection refused")) {
+                                    reject(new Error("Handshake failed or Connection refused"));
+                                    return;
+                                }
+
+                                resolve({ stdout: userStdout, stderr: userStderr, tracerJson: tracerStdout });
+                            }
+                        });
+                    }, 500);
                 });
-            }, 500); // 500ms delay to let VM start
-        });
 
-        try {
-            let result: any = {};
-            // Tracer stdout should be the JSON
-            const output = tracerJson || "";
-            // Debug logging
-            console.log("Tracer Output Length:", output.length);
-            if (output.length < 100) console.log("Tracer Output:", output);
+                // If we got here, success!
+                let result: any = {};
+                const output = tracerJson || "";
 
-            const jsonStart = output.indexOf('{');
-            const jsonEnd = output.lastIndexOf('}');
+                // ... parse ...
+                const jsonStart = output.indexOf('{');
+                const jsonEnd = output.lastIndexOf('}');
 
-            if (jsonStart !== -1 && jsonEnd !== -1) {
-                const jsonString = output.substring(jsonStart, jsonEnd + 1);
-                result = JSON.parse(jsonString);
+                if (jsonStart !== -1 && jsonEnd !== -1) {
+                    const jsonString = output.substring(jsonStart, jsonEnd + 1);
+                    result = JSON.parse(jsonString);
+                }
+
+                result.stdout = stdout;
+                result.stderr = stderr;
+                return NextResponse.json(result);
+
+            } catch (err: any) {
+                console.error(`[${id}] Attempt ${attempts} failed: ${err.message}`);
+                if (attempts >= maxAttempts) {
+                    throw err; // Re-throw to be caught by outer handler
+                }
+                // Wait a bit before retrying
+                await new Promise(r => setTimeout(r, 200));
             }
+        } // End of retry loop
 
-            // Inject User Output into Result
-            result.stdout = stdout;
-            // Merge stderr if needed, or just take user stderr
-            result.stderr = stderr;
+        return NextResponse.json({ error: "Unexpected execution flow" }, { status: 500 });
 
-            await logDebug(`[${id}] Sending Response Keys: ${Object.keys(result)}`);
-            await logDebug(`[${id}] Response History Size: ${result.history?.length}`);
-
-            return NextResponse.json(result);
-
-        } catch (e: any) {
-            return NextResponse.json({
-                stdout: (stdout as any).stdout,
-                stderr: (stdout as any).stderr + "\n" + (stdout as any).tracerJson // Debug info
-            });
-        }
     } catch (e: any) {
         return NextResponse.json({ error: e.message }, { status: 500 });
     } finally {
