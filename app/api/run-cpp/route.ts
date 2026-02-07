@@ -2,10 +2,9 @@ import { NextResponse } from 'next/server';
 import { writeFile, mkdir, rm, unlink } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { join } from 'path';
-import { nanoid } from 'nanoid';
+import { tmpdir } from 'os';
 
-const execAsync = promisify(exec);
+// ...
 
 export async function POST(req: Request) {
     let tmpDir = '';
@@ -14,7 +13,7 @@ export async function POST(req: Request) {
         if (!code) return NextResponse.json({ error: 'No code provided' }, { status: 400 });
 
         const id = nanoid();
-        tmpDir = join(process.cwd(), 'tmp', id);
+        tmpDir = join(tmpdir(), id);
         const sourcePath = join(tmpDir, 'program.cpp');
         const binaryPath = join(tmpDir, process.platform === 'win32' ? 'program.exe' : 'program');
 
