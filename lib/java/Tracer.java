@@ -1,13 +1,12 @@
 import com.sun.jdi.*;
 import com.sun.jdi.connect.Connector;
-import com.sun.jdi.connect.LaunchingConnector;
+import com.sun.jdi.connect.ListeningConnector;
 import com.sun.jdi.connect.IllegalConnectorArgumentsException;
 import com.sun.jdi.event.*;
 import com.sun.jdi.request.EventRequest;
 import com.sun.jdi.request.StepRequest;
-import com.sun.jdi.request.BreakpointRequest; 
+import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.EventRequestManager;
-import com.sun.jdi.connect.Transport;
 import com.sun.jdi.request.MethodEntryRequest;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -18,15 +17,13 @@ import java.util.*;
 public class Tracer {
 
     private static VirtualMachine vm;
-    private static Map<String, String> objIdMap = new HashMap<>(); // ObjectReference unique ID -> UUID (String)
-    private static Map<String, Object> store = new HashMap<>(); // Heap storage
+    private static Map<String, String> objIdMap = new HashMap<>(); 
+    private static Map<String, Object> store = new HashMap<>(); 
     private static List<Map<String, Object>> history = new ArrayList<>();
-    private static Set<String> recursing = new HashSet<>(); // Recursion guard for serialization
+    private static Set<String> recursing = new HashSet<>(); 
 
-    // To identify our target class
     private static String TARGET_CLASS = "Main";
 
-    // Output buffers
     private static StringBuilder targetStdout = new StringBuilder();
     private static StringBuilder targetStderr = new StringBuilder();
 
@@ -39,57 +36,75 @@ public class Tracer {
         String mainClass = args[1];
         TARGET_CLASS = mainClass;
 
-        // 1. Launch the target VM
-        try {
-            vm = launchTarget(classPath, mainClass);
-        } catch (Exception e) {
-            System.err.println("Failed to launch: " + e.getMessage());
-            e.printStackTrace();
-            System.exit(1);
+        // 1. Setup Listening Connector
+        ListeningConnector connector = null;
+        for (ListeningConnector lc : Bootstrap.virtualMachineManager().listeningConnectors()) {
+            if (lc.name().equals("com.sun.jdi.SocketListen")) {
+                connector = lc;
+                break;
+            }
         }
+        if (connector == null) throw new RuntimeException("No SocketListen connector found");
 
-        // 2. Start Stream Readers for Child Process
-        startStreamReaders(vm.process());
+        Map<String, Connector.Argument> connectorArgs = connector.defaultArguments();
+        connectorArgs.get("port").setValue("0"); // Ephemeral port
+        connectorArgs.get("localAddress").setValue("127.0.0.1");
 
-        // 3. Set up event request for ClassPrepare
+        String listeningAddress = connector.startListening(connectorArgs);
+        // listeningAddress is usually "127.0.0.1:45321" or similar
+        int portSeparator = listeningAddress.lastIndexOf(':');
+        String port = listeningAddress.substring(portSeparator + 1);
+        
+        System.err.println("Tracer listening on: " + listeningAddress);
+
+        // 2. Launch Target Process
+        // Command: java -Xmx64m -agentlib:jdwp=transport=dt_socket,server=n,address=127.0.0.1:<port>,suspend=y -cp <cp> <main>
+        ProcessBuilder pb = new ProcessBuilder(
+            "java",
+            "-Xmx64m",
+            "-agentlib:jdwp=transport=dt_socket,server=n,address=127.0.0.1:" + port + ",suspend=y",
+            "-cp", classPath,
+            mainClass
+        );
+
+        // We want to capture the user process stdout/stderr
+        Process process = pb.start();
+        startStreamReaders(process);
+
+        // 3. Accept Connection (with retry for bad handshakes)
+        while (true) {
+            try {
+                vm = connector.accept(connectorArgs);
+                break; // Connection accepted!
+            } catch (IOException e) {
+                // Handshake failed (likely a probe). Ignore and retry.
+                System.err.println("Ignored invalid connection request: " + e.getMessage());
+            } catch (Exception e) {
+                System.err.println("Accept failed fatal: " + e.getMessage());
+                throw e;
+            }
+        }
+        connector.stopListening(connectorArgs);
+
+        // 4. Setup Events
         EventRequestManager erm = vm.eventRequestManager();
         com.sun.jdi.request.ClassPrepareRequest classPrepareRequest = erm.createClassPrepareRequest();
         classPrepareRequest.addClassFilter(TARGET_CLASS);
         classPrepareRequest.enable();
         
-        // Watch for method entry to capture traceCondition checks
         MethodEntryRequest methodEntryRequest = erm.createMethodEntryRequest();
         methodEntryRequest.addClassFilter(TARGET_CLASS);
         methodEntryRequest.enable();
 
-        // 4. Event Loop
+        // 5. Run Event Loop
         runEventLoop(vm);
 
-        // 5. Output Result
+        // 6. Output Result
         printJsonResult();
-    }
-
-    private static VirtualMachine launchTarget(String classPath, String mainClass) throws Exception {
-        LaunchingConnector launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
-        Map<String, Connector.Argument> arguments = launchingConnector.defaultArguments();
         
-        Connector.Argument mainArg = arguments.get("main");
-        if (mainArg == null) throw new IllegalStateException("Bad launching connector");
-        mainArg.setValue(mainClass);
-
-        Connector.Argument optionsArg = arguments.get("options");
-        if (optionsArg != null) {
-            // Pass classpath and memory limit
-            // Try without quotes first, assuming no spaces in /tmp path
-            optionsArg.setValue("-cp " + classPath + " -Xmx64m");
-        }
-
-        try {
-            return launchingConnector.launch(arguments);
-        } catch (IllegalConnectorArgumentsException e) {
-            System.err.println("IllegalConnectorArgumentsException: " + e.argumentNames());
-            System.out.println("JSON_START{\"error\": \"Launch Failed\", \"details\": \"" + e.argumentNames() + "\"}JSON_END"); // Fallback JSON
-            throw e;
+        // Ensure child process is killed if it's still running
+        if (process.isAlive()) {
+            process.destroyForcibly();
         }
     }
 
@@ -106,9 +121,7 @@ public class Tracer {
                     sb.append(line).append("\n");
                 }
             }
-        } catch (IOException e) {
-            // Ignore stream closed errors
-        }
+        } catch (IOException e) { }
     }
 
     private static void runEventLoop(VirtualMachine vm) throws Exception {
@@ -124,7 +137,6 @@ public class Tracer {
                         ReferenceType classType = evt.referenceType();
                         Method mainMethod = classType.methodsByName("main").get(0);
                         if (mainMethod != null) {
-                            // Breakpoint at start of main
                             Location loc = mainMethod.location();
                             BreakpointRequest bpReq = vm.eventRequestManager().createBreakpointRequest(loc);
                             bpReq.enable();
@@ -134,18 +146,11 @@ public class Tracer {
                         BreakpointEvent evt = (BreakpointEvent) event;
                         ThreadReference thread = evt.thread();
                         StackFrame frame = thread.frame(0);
-                        
-                        // We hit main. Now step!
                         EventRequestManager erm = vm.eventRequestManager();
-                        // Delete the breakpoint
                         erm.deleteEventRequest(evt.request());
-
-                        // Create StepRequest
                         StepRequest stepReq = erm.createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_OVER);
                         stepReq.addClassFilter(TARGET_CLASS);
                         stepReq.enable();
-                        
-                        // Record initial state
                         recordState(frame, thread, "Breakpoint hit");
                     } 
                     else if (event instanceof StepEvent) {
@@ -164,8 +169,6 @@ public class Tracer {
                              if (arg instanceof BooleanValue) {
                                  condResult = ((BooleanValue) arg).value();
                              }
-                             
-                             // Record this specialized state
                              if (!history.isEmpty()) {
                                  Map<String, Object> lastStep = history.get(history.size() - 1);
                                  lastStep.put("conditionResult", condResult);
@@ -183,16 +186,13 @@ public class Tracer {
         }
     }
 
-    // --- Serialization and Snapshot Logic ---
-
     private static void recordState(StackFrame frame, ThreadReference thread, String reason) {
         try {
             Map<String, Object> snapshot = new HashMap<>();
             
-            // Capture Stack
+            // Stack
             List<Map<String, Object>> stackTrace = new ArrayList<>();
             for (StackFrame f : thread.frames()) {
-                // Only capture frames from our target class to avoid noise
                 if (f.location().declaringType().name().equals(TARGET_CLASS) || f.location().declaringType().name().equals("Main")) {
                      Map<String, Object> frameInfo = new HashMap<>();
                      frameInfo.put("name", f.location().method().name());
@@ -203,36 +203,26 @@ public class Tracer {
             snapshot.put("stack", stackTrace);
             snapshot.put("line", frame.location().lineNumber());
 
-            // Capture Variables (Roots)
+            // Roots
             Map<String, Object> roots = new HashMap<>();
-            
             try {
-                // Local variables
                 Map<LocalVariable, Value> visibleVariables = frame.getValues(frame.visibleVariables());
                 for (Map.Entry<LocalVariable, Value> entry : visibleVariables.entrySet()) {
                     roots.put(entry.getKey().name(), serialize(entry.getValue()));
                 }
-                
-                // Static fields of the class
                 ReferenceType type = frame.location().declaringType();
                 for (Field field : type.visibleFields()) {
                     if (field.isStatic()) {
                         roots.put(field.name(), serialize(type.getValue(field)));
                     } else {
-                        // Instance fields if 'this' exists
                         ObjectReference thisObj = frame.thisObject();
                         if (thisObj != null) {
                             roots.put(field.name(), serialize(thisObj.getValue(field)));
                         }
                     }
                 }
-            } catch (AbsentInformationException e) {
-                // Info not available (compiled without -g?)
-            }
-
+            } catch (AbsentInformationException e) { }
             snapshot.put("roots", roots);
-            
-            // Store Snapshot of Heap (Global Store is updated by serialize)
             snapshot.put("store", new HashMap<>(store));
             
             history.add(snapshot);
@@ -262,12 +252,10 @@ public class Tracer {
             String id = getObjectId(arrayRef);
             if (!store.containsKey(id)) {
                 store.put(id, null); 
-                
                 List<Object> elements = new ArrayList<>();
                 for (Value v : arrayRef.getValues()) {
                     elements.add(serialize(v));
                 }
-                
                 Map<String, Object> arrayData = new HashMap<>();
                 arrayData.put("type", "array");
                 arrayData.put("value", elements);
@@ -280,34 +268,26 @@ public class Tracer {
         } else if (value instanceof ObjectReference) {
             ObjectReference objRef = (ObjectReference) value;
             String id = getObjectId(objRef);
-            
             if (recursing.contains(id)) {
                 Map<String, String> ref = new HashMap<>();
                 ref.put("__viz_ref", id);
                 return ref;
             }
-            
             if (!store.containsKey(id)) {
                 recursing.add(id);
                 Map<String, Object> fields = new HashMap<>();
                 ReferenceType type = objRef.referenceType();
-                
-                // Identify Special Types
                 for (Field f : type.visibleFields()) {
                     fields.put(f.name(), serialize(objRef.getValue(f)));
                 }
-                
                 Map<String, Object> objData = new HashMap<>();
                 objData.put("type", "object");
                 objData.put("value", fields);
                 objData.put("__viz_id", id);
-                
-                if (fields.containsKey("val") && (fields.containsKey("next") || fields.containsKey("left") || fields.containsKey("right"))) {
-                    if (fields.containsKey("left") || fields.containsKey("right")) {
-                        objData.put("__viz_type", "treenode");
-                    } else if (fields.containsKey("next")) {
-                        objData.put("__viz_type", "node");
-                    }
+                // Heuristic for types
+                if (fields.containsKey("val") && (fields.containsKey("next") || fields.containsKey("left"))) {
+                    if (fields.containsKey("left")) objData.put("__viz_type", "treenode");
+                    else if (fields.containsKey("next")) objData.put("__viz_type", "node");
                 }
                 store.put(id, objData);
                 recursing.remove(id);
@@ -329,16 +309,12 @@ public class Tracer {
 
     private static void printJsonResult() {
         System.out.print("{");
-        
-        // Output Streams
         System.out.print("\"stdout\": \"");
         System.out.print(escapeJson(targetStdout.toString()));
         System.out.print("\", ");
-
         System.out.print("\"stderr\": \"");
         System.out.print(escapeJson(targetStderr.toString()));
         System.out.print("\", ");
-
         System.out.print("\"history\": [");
         for (int i = 0; i < history.size(); i++) {
             printJsonMap(history.get(i));
@@ -384,10 +360,6 @@ public class Tracer {
 
     private static String escapeJson(String s) {
         if (s == null) return "";
-        return s.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 }
