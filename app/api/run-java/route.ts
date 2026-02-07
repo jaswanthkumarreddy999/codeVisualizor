@@ -260,7 +260,7 @@ ${processedScript}
 
         // Compile
         try {
-            await execAsync(`javac --enable-preview --release 21 -g "${filePath}"`);
+            await execAsync(`javac --release 17 -g "${filePath}"`);
         } catch (compileError: any) {
             return NextResponse.json({
                 error: "Compilation Failed",
@@ -280,7 +280,7 @@ ${processedScript}
 
             // Add memory limits via environment variable which applies to both Tracer and Child VM
             // Added --enable-preview to support unnamed classes
-            const child = exec(`java --enable-preview -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, {
+            const child = exec(`java -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, {
                 timeout: 10000,
                 env: { ...process.env, JAVA_TOOL_OPTIONS: '-Xmx64m' }
             }, (error, stdout, stderr) => {
