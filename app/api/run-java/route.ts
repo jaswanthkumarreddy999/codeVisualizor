@@ -8,6 +8,11 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
+// Debugging helper
+const logDebug = async (msg: string) => {
+    // console.log(msg); // Uncomment for verbose logging
+};
+
 export async function POST(req: Request) {
     let filePath: string | undefined;
     let classPath: string | undefined;
@@ -262,6 +267,7 @@ ${processedScript}
         try {
             await execAsync(`javac --release 17 -g "${filePath}"`);
         } catch (compileError: any) {
+            await logDebug(`[${id}] Compilation Failed: ${compileError.stderr || compileError.message}`);
             return NextResponse.json({
                 error: "Compilation Failed",
                 stderr: compileError.stderr || compileError.message
@@ -279,7 +285,11 @@ ${processedScript}
         // Pick a random port (simple approach for now)
         const port = Math.floor(Math.random() * (40000 - 30000 + 1) + 30000).toString();
 
-        const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string, tracerJson?: string }>((resolve, reject) => {
+        await logDebug(`[${id}] Starting Java execution on port ${port}`);
+        await logDebug(`[${id}] ClassPath: ${classPath}`);
+        await logDebug(`[${id}] TracerPath: ${tracerClassPath}`);
+
+        const { stdout, stderr, tracerJson } = await new Promise<{ stdout: string, stderr: string, tracerJson?: string }>((resolve, reject) => {
             let userStdout = '';
             let userStderr = '';
             let tracerStdout = '';
@@ -337,6 +347,10 @@ ${processedScript}
                     if (!processed) {
                         processed = true;
                         // Combine results
+                        logDebug(`[${id}] User Stdout: ${userStdout}`);
+                        logDebug(`[${id}] User Stderr: ${userStderr}`);
+                        logDebug(`[${id}] Tracer Stdout: ${tracerStdout}`);
+                        logDebug(`[${id}] Tracer Stderr: ${tracerStderr}`);
                         resolve({ stdout: userStdout, stderr: userStderr, tracerJson: tracerStdout });
                     }
                 });
@@ -346,7 +360,7 @@ ${processedScript}
         try {
             let result: any = {};
             // Tracer stdout should be the JSON
-            const output = (stdout as any).tracerJson || "";
+            const output = tracerJson || "";
             // Debug logging
             console.log("Tracer Output Length:", output.length);
             if (output.length < 100) console.log("Tracer Output:", output);
@@ -360,12 +374,12 @@ ${processedScript}
             }
 
             // Inject User Output into Result
-            result.stdout = (stdout as any).stdout;
+            result.stdout = stdout;
             // Merge stderr if needed, or just take user stderr
-            result.stderr = (stdout as any).stderr;
+            result.stderr = stderr;
 
-            // If tracer had a specific error (like connection failed), it might be in tracerStderr
-            // But usually we just care about user code stderr.
+            await logDebug(`[${id}] Sending Response Keys: ${Object.keys(result)}`);
+            await logDebug(`[${id}] Response History Size: ${result.history?.length}`);
 
             return NextResponse.json(result);
 
