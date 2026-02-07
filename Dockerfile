@@ -19,6 +19,10 @@ RUN npm ci
 # Copy source
 COPY . .
 
+# Compile Tracer.java (Java 17)
+RUN javac lib/java/Tracer.java
+
+
 # Build Next.js app
 RUN npm run build
 
