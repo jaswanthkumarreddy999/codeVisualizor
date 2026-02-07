@@ -6,6 +6,7 @@ import com.sun.jdi.request.EventRequest;
 import com.sun.jdi.request.StepRequest;
 import com.sun.jdi.request.EventRequestManager; // Added import
 import com.sun.jdi.connect.Transport; // Added import
+import com.sun.jdi.request.MethodEntryRequest; // Added import
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;

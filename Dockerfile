@@ -19,12 +19,8 @@ RUN npm ci
 # Copy source
 COPY . .
 
-# Compile Tracer.java (Java 17) with JDI modules exported
-RUN javac --add-exports jdk.jdi/com.sun.jdi=ALL-UNNAMED \
-    --add-exports jdk.jdi/com.sun.jdi.connect=ALL-UNNAMED \
-    --add-exports jdk.jdi/com.sun.jdi.event=ALL-UNNAMED \
-    --add-exports jdk.jdi/com.sun.jdi.request=ALL-UNNAMED \
-    lib/java/Tracer.java
+# Compile Tracer.java (Java 17) with JDI module added
+RUN javac --add-modules jdk.jdi lib/java/Tracer.java
 
 
 # Build Next.js app
