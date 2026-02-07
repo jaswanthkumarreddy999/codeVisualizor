@@ -294,8 +294,8 @@ ${processedScript}
             delete userEnv._JAVA_OPTIONS;
 
             // Construct command
-            // Note: For newer Java, address=localhost:port is preferred over address=port
-            const agentLib = `-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=localhost:${port}`;
+            // WE USE 127.0.0.1 explicit IP to match Tracer
+            const agentLib = `-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=127.0.0.1:${port}`;
             // Add memory limit
             const memLimit = '-Xmx64m';
 
@@ -326,7 +326,8 @@ ${processedScript}
                 delete tracerEnv.JAVA_TOOL_OPTIONS;
                 delete tracerEnv._JAVA_OPTIONS;
 
-                const tracerChild = exec(`java -cp "${tracerClassPath}${sep}${classPath}" Tracer ${port} Main`, {
+                // Add --add-modules jdk.jdi to ensure runtime access
+                const tracerChild = exec(`java --add-modules jdk.jdi -cp "${tracerClassPath}${sep}${classPath}" Tracer ${port} Main`, {
                     timeout: 10000,
                     env: tracerEnv
                 }, (error, stdout, stderr) => {

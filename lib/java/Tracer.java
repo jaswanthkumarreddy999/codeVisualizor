@@ -78,7 +78,7 @@ public class Tracer {
         }
 
         Map<String, Connector.Argument> arguments = attachingConnector.defaultArguments();
-        arguments.get("hostname").setValue("localhost");
+        arguments.get("hostname").setValue("127.0.0.1");
         arguments.get("port").setValue(port);
         arguments.get("timeout").setValue("10000"); // 10s timeout
 
