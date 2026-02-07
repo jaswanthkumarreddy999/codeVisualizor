@@ -278,10 +278,12 @@ ${processedScript}
             // Also need to allow JDI access if needed, but Tracer is standard java program. 
             // However, Tracer USES com.sun.jdi which is in the JDK.
 
-            // We unset JAVA_TOOL_OPTIONS to prevent "Picked up ..." message from interfering with JDI handshake
-            // Memory limit is passed directly to the Tracer process via -Xmx64m
+            // Disable "Picked up ..." variable
+            // Also log env to see what's there
+            console.log("Current Environment Variables:", Object.keys(process.env));
             const env = { ...process.env };
             delete env.JAVA_TOOL_OPTIONS;
+            delete env._JAVA_OPTIONS; // Try deleting this too just in case
 
             const child = exec(`java -Xmx64m -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, {
                 timeout: 10000,
