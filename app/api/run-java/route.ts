@@ -346,6 +346,10 @@ ${processedScript}
             let result: any = {};
             // Tracer stdout should be the JSON
             const output = (stdout as any).tracerJson || "";
+            // Debug logging
+            console.log("Tracer Output Length:", output.length);
+            if (output.length < 100) console.log("Tracer Output:", output);
+
             const jsonStart = output.indexOf('{');
             const jsonEnd = output.lastIndexOf('}');
 
