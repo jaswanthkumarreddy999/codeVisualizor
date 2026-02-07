@@ -269,81 +269,107 @@ ${processedScript}
         }
 
         // Run with Tracer
-        // java -cp <classpath of tracer>:<classpath of user code> Tracer Main
+        // New Logic: 
+        // 1. Start User Process with -agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=localhost:<PORT>
+        // 2. Start Tracer Process with <PORT>
+
         const tracerClassPath = join(process.cwd(), 'lib/java');
         const sep = process.platform === 'win32' ? ';' : ':';
 
-        const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string }>((resolve, reject) => {
-            // NOTE: We need to include the current directory (or where Tracer is) and the user code directory in classpath
-            // Also need to allow JDI access if needed, but Tracer is standard java program. 
-            // However, Tracer USES com.sun.jdi which is in the JDK.
+        // Pick a random port (simple approach for now)
+        const port = Math.floor(Math.random() * (40000 - 30000 + 1) + 30000).toString();
 
-            // Disable "Picked up ..." variable
-            // Also log env to see what's there
-            console.log("Current Environment Variables:", Object.keys(process.env));
-            const env = { ...process.env };
-            delete env.JAVA_TOOL_OPTIONS;
-            delete env._JAVA_OPTIONS; // Try deleting this too just in case
+        const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string, tracerJson?: string }>((resolve, reject) => {
+            let userStdout = '';
+            let userStderr = '';
+            let tracerStdout = '';
+            let tracerStderr = '';
+            let processed = false;
 
-            const child = exec(`java -Xmx64m -cp "${tracerClassPath}${sep}${classPath}" Tracer Main`, {
+            // --- 1. User Process ---
+            // java -agentlib:... -cp ... Main
+            const userEnv = { ...process.env };
+            // Unset tool options for user process to allow clean output
+            delete userEnv.JAVA_TOOL_OPTIONS;
+            delete userEnv._JAVA_OPTIONS;
+
+            // Construct command
+            // Note: For newer Java, address=localhost:port is preferred over address=port
+            const agentLib = `-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=localhost:${port}`;
+            // Add memory limit
+            const memLimit = '-Xmx64m';
+
+            // Allow preview features if needed, but keeping it simple for now
+            const userChild = exec(`java ${memLimit} ${agentLib} -cp "${tracerClassPath}${sep}${classPath}" Main`, {
                 timeout: 10000,
-                env
+                env: userEnv
             }, (error, stdout, stderr) => {
-                const cleanStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
-                resolve({ stdout: stdout as string, stderr: cleanStderr });
+                // User process finished
+                userStdout = stdout as string;
+                // Clean up stderr if needed
+                userStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
+
+                // If tracer hasn't finished yet (unlikely if user process died, but possible),
+                // we mainly wait for tracer to output JSON. 
+                // However, if user process dies, tracer usually gets VMDisconnect event and finishes too.
             });
 
-            if (input && child.stdin) {
-                child.stdin.write(input);
-                child.stdin.end();
+            if (input && userChild.stdin) {
+                userChild.stdin.write(input);
+                userChild.stdin.end();
             }
+
+            // --- 2. Tracer Process ---
+            // Wait a bit for User Process to initialize and open port?
+            setTimeout(() => {
+                const tracerEnv = { ...process.env };
+                delete tracerEnv.JAVA_TOOL_OPTIONS;
+                delete tracerEnv._JAVA_OPTIONS;
+
+                const tracerChild = exec(`java -cp "${tracerClassPath}${sep}${classPath}" Tracer ${port} Main`, {
+                    timeout: 10000,
+                    env: tracerEnv
+                }, (error, stdout, stderr) => {
+                    tracerStdout = stdout as string;
+                    tracerStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
+
+                    if (!processed) {
+                        processed = true;
+                        // Combine results
+                        resolve({ stdout: userStdout, stderr: userStderr, tracerJson: tracerStdout });
+                    }
+                });
+            }, 500); // 500ms delay to let VM start
         });
 
         try {
-            // Attempt to parse the stdout as JSON history
-            // The Tracer prints the JSON blob at the end.
-            // But if the user code prints something, it might be mixed? 
-            // Actually, my Tracer implementation prints the JSON as the last line (or only thing if logic holds).
-            // But the User code runs in the VM connected to the tracer...
-            // Wait, `LaunchingConnector` launches the target VM. 
-            // Does the Tracer inherit stdout of the target VM?
-            // "The target VM's standard output and standard error are redirected to the process returned by launch()."
-            // So Process (which we didn't expose in my Tracer code) holds the stream.
-            // My Tracer `launchTarget` returns `VirtualMachine`. 
-            // `LaunchingConnector.launch` returns `VirtualMachine`, but `Process` is available via `vm.process()`.
-            // I need to forward that output or capture it in the Tracer!
-            // I missed that in Tracer.java. 
-            // The Tracer.java currently does NOT print the user's output.
-            // I should update Tracer.java to capture `vm.process().getInputStream()` and print it or include it in JSON.
-            // But for now let's see what happens. If I don't forward it, user output is lost.
-            // The user wants visualization. 
-            // Let's assume for now I will get the JSON.
+            let result: any = {};
+            // Tracer stdout should be the JSON
+            const output = (stdout as any).tracerJson || "";
+            const jsonStart = output.indexOf('{');
+            const jsonEnd = output.lastIndexOf('}');
 
-            // Robust JSON extraction: Find start and end of JSON object
-            const jsonStart = stdout.indexOf('{');
-            const jsonEnd = stdout.lastIndexOf('}');
-
-            if (jsonStart === -1 || jsonEnd === -1) {
-                throw new Error("No JSON output found in stdout");
+            if (jsonStart !== -1 && jsonEnd !== -1) {
+                const jsonString = output.substring(jsonStart, jsonEnd + 1);
+                result = JSON.parse(jsonString);
             }
 
-            const jsonString = stdout.substring(jsonStart, jsonEnd + 1);
-            let result = JSON.parse(jsonString);
+            // Inject User Output into Result
+            result.stdout = (stdout as any).stdout;
+            // Merge stderr if needed, or just take user stderr
+            result.stderr = (stdout as any).stderr;
 
-            // Clean up stderr in the result object
-            if (result.stderr) {
-                result.stderr = (result.stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
-            }
+            // If tracer had a specific error (like connection failed), it might be in tracerStderr
+            // But usually we just care about user code stderr.
 
-            // If parse succeeds, great.
             return NextResponse.json(result);
-        } catch (e) {
-            // If not JSON, maybe just raw output or error
-            // Also clean this stderr just in case
-            const finalStderr = (stderr as string).replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '').trim();
-            return NextResponse.json({ stdout, stderr: finalStderr });
-        }
 
+        } catch (e: any) {
+            return NextResponse.json({
+                stdout: (stdout as any).stdout,
+                stderr: (stdout as any).stderr + "\n" + (stdout as any).tracerJson // Debug info
+            });
+        }
     } catch (e: any) {
         return NextResponse.json({ error: e.message }, { status: 500 });
     } finally {

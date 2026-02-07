@@ -1,13 +1,12 @@
 import com.sun.jdi.*;
 import com.sun.jdi.connect.Connector;
-import com.sun.jdi.connect.LaunchingConnector;
+import com.sun.jdi.connect.AttachingConnector;
 import com.sun.jdi.event.*;
 import com.sun.jdi.request.EventRequest;
 import com.sun.jdi.request.StepRequest;
-import com.sun.jdi.request.EventRequestManager; // Added import
-import com.sun.jdi.connect.Transport; // Added import
-import com.sun.jdi.request.MethodEntryRequest; // Added import
-import java.io.BufferedReader;
+import com.sun.jdi.request.EventRequestManager;
+import com.sun.jdi.connect.Transport;
+import com.sun.jdi.request.MethodEntryRequest;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.*;
@@ -28,27 +27,26 @@ public class Tracer {
     private static StringBuilder targetStderr = new StringBuilder();
 
     public static void main(String[] args) throws Exception {
-        if (args.length < 1) {
-            System.err.println("Usage: java Tracer <ClassToDebug>");
+        if (args.length < 2) {
+            System.err.println("Usage: java Tracer <PORT> <ClassToDebug>");
             System.exit(1);
         }
-        TARGET_CLASS = args[0];
+        String port = args[0];
+        TARGET_CLASS = args[1];
 
-        // 1. Launch the target VM
-        vm = launchTarget(TARGET_CLASS);
-
-        // 1.5 Start threads to gobble output
-        Process process = vm.process();
-        Thread outThread = new Thread(() -> readStream(process.getInputStream(), targetStdout));
-        Thread errThread = new Thread(() -> readStream(process.getErrorStream(), targetStderr));
-        outThread.start();
-        errThread.start();
+        // 1. Attach to the target VM
+        try {
+            vm = attachTarget(port);
+        } catch (Exception e) {
+            System.err.println("Failed to attach: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
 
         // 2. Set up event request for ClassPrepare (to set breakpoint at main)
         EventRequestManager erm = vm.eventRequestManager();
         // watching for target class load
         com.sun.jdi.request.ClassPrepareRequest classPrepareRequest = erm.createClassPrepareRequest();
-        classPrepareRequest.addClassFilter(TARGET_CLASS);
         classPrepareRequest.addClassFilter(TARGET_CLASS);
         classPrepareRequest.enable();
         
@@ -60,62 +58,31 @@ public class Tracer {
         // 3. Event Loop
         runEventLoop(vm);
 
-        // Wait for output threads to finish? They might block if process doesn't close
-        // streams?
-        // VM death should close them.
-        try {
-            outThread.join(1000);
-            errThread.join(1000);
-        } catch (InterruptedException e) {
-        }
-
         // 4. Output Result
         printJsonResult();
     }
 
-    private static void readStream(InputStream is, StringBuilder sb) {
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                sb.append(line).append("\n");
-            }
-        } catch (Exception e) {
-        }
-    }
-
-    private static VirtualMachine launchTarget(String mainClass) throws Exception {
-        LaunchingConnector launchingConnector = null;
+    private static VirtualMachine attachTarget(String port) throws Exception {
+        AttachingConnector attachingConnector = null;
         
-        // First try to find the specific CommandLineLaunch connector which is standard
-        for (LaunchingConnector lc : Bootstrap.virtualMachineManager().launchingConnectors()) {
-            if (lc.name().equals("com.sun.jdi.CommandLineLaunch")) {
-                launchingConnector = lc;
+        // Find SocketAttachingConnector
+        for (AttachingConnector ac : Bootstrap.virtualMachineManager().attachingConnectors()) {
+            if (ac.name().equals("com.sun.jdi.SocketAttach")) {
+                attachingConnector = ac;
                 break;
             }
         }
 
-        // Fallback: Find any connector that has "main" argument
-        if (launchingConnector == null) {
-            for (LaunchingConnector lc : Bootstrap.virtualMachineManager().launchingConnectors()) {
-                Map<String, Connector.Argument> args = lc.defaultArguments();
-                if (args.containsKey("main") && args.containsKey("options")) {
-                    launchingConnector = lc;
-                    break;
-                }
-            }
+        if (attachingConnector == null) {
+            throw new IllegalStateException("Could not find SocketAttachingConnector");
         }
 
-        // Fallback to default if not found
-        if (launchingConnector == null) {
-            launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
-        }
+        Map<String, Connector.Argument> arguments = attachingConnector.defaultArguments();
+        arguments.get("hostname").setValue("localhost");
+        arguments.get("port").setValue(port);
+        arguments.get("timeout").setValue("10000"); // 10s timeout
 
-        Map<String, Connector.Argument> arguments = launchingConnector.defaultArguments();
-        arguments.get("main").setValue(mainClass);
-        // Use the current classpath for the target VM so it can find the user class
-        String currentCp = System.getProperty("java.class.path");
-        arguments.get("options").setValue("-cp \"" + currentCp + "\" -Xmx64m");
-        return launchingConnector.launch(arguments);
+        return attachingConnector.attach(arguments);
     }
 
     private static void runEventLoop(VirtualMachine vm) throws Exception {
