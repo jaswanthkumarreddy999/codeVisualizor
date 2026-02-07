@@ -410,7 +410,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             if (prevLine !== undefined) {
                                 setAnimState({ line: prevLine, completed: true });
                             }
-                        }, 500);
+                        }, 100);
                     }}
                 />
             )}

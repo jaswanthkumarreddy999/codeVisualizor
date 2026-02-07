@@ -378,6 +378,12 @@ ${processedScript}
 
                 result.stdout = stdout;
                 result.stderr = stderr;
+
+                // Debug logging for production:
+                console.log(`[${id}] Java stdout length: ${stdout ? stdout.length : 0}`);
+                if (stdout && stdout.length < 500) console.log(`[${id}] Java stdout preview: ${stdout}`);
+                if (stderr) console.log(`[${id}] Java stderr size: ${stderr.length}`);
+
                 return NextResponse.json(result);
 
             } catch (err: any) {

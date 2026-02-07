@@ -65,29 +65,28 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
         if (secondaryOperator) {
             // Extended Sequence for 2-step operations
             // 0ms: Start (Spawn)
-            // 800ms: Operands arrive & merge -> Show Intermediate Result (e.g. 1)
-            t1 = setTimeout(() => setStage(1), 800);
+            // 600ms: Operands arrive & merge -> Show Intermediate Result
+            t1 = setTimeout(() => setStage(1), 600);
 
-            // 1800ms: Show Secondary Op (e.g. == 0) fading in
-            t2 = setTimeout(() => setStage(2), 1800);
+            // 1200ms: Show Secondary Op (e.g. == 0) fading in
+            t2 = setTimeout(() => setStage(2), 1200);
 
-            // 3000ms: Evaluation Pause (Let user see '1 == 0') -> Start Fade Swap
-            // Stage 3: Fade IN Final Result, Fade OUT Intermediate/Secondary
-            t3 = setTimeout(() => setStage(3), 3000);
+            // 2000ms: Evaluation Pause -> Start Fade Swap to Final Result
+            t3 = setTimeout(() => setStage(3), 2000);
 
-            // 4500ms: Move to target (if exists) or Finish
-            t4 = setTimeout(() => setStage(4), 4500);
+            // 3000ms: Move to target (if exists) or Finish
+            t4 = setTimeout(() => setStage(4), 3000);
 
-            // 5500ms: Finish
-            t5 = setTimeout(() => onComplete(), 5500);
+            // 3800ms: Finish (Trigger onComplete)
+            t5 = setTimeout(() => onComplete(), 3800);
         } else {
             // Standard Sequence
             // 0ms: Start
-            // 800ms: Arrive at meeting point
-            // 2000ms: Result moves to target
-            t1 = setTimeout(() => setStage(1), 800);
-            t2 = setTimeout(() => setStage(4), 2000);
-            t3 = setTimeout(() => onComplete(), 3000);
+            // 600ms: Arrive at meeting point
+            // 1500ms: Result moves to target
+            t1 = setTimeout(() => setStage(1), 600);
+            t2 = setTimeout(() => setStage(4), 1500);
+            t3 = setTimeout(() => onComplete(), 2000);
         }
 
         return () => {
