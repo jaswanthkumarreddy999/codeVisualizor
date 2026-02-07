@@ -1,4 +1,4 @@
-import { tmpdir } from 'os';
+
 import { join } from 'path';
 import { writeFile, mkdir, rm } from 'fs/promises';
 import { nanoid } from 'nanoid';
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     try {
         const { code, input } = await req.json();
         const id = nanoid();
-        const tmpDir = join(tmpdir(), id);
+        const tmpDir = join(process.cwd(), 'tmp', id);
         classPath = tmpDir;
 
         await mkdir(tmpDir, { recursive: true });
