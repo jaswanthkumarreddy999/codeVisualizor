@@ -3,8 +3,10 @@ import { writeFile, mkdir, rm, unlink } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { tmpdir } from 'os';
+import { join } from 'path';
+import { nanoid } from 'nanoid';
 
-// ...
+const execAsync = promisify(exec);
 
 export async function POST(req: Request) {
     let tmpDir = '';
