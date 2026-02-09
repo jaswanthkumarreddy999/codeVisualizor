@@ -8,6 +8,7 @@ import { HashMapVisualizer } from './HashMapVisualizer';
 import { ArrayVisualizer } from './ArrayVisualizer';
 import { PrimitiveVisualizer } from './PrimitiveVisualizer';
 import { ArithmeticAnimator } from './ArithmeticAnimator';
+import { LinkedListVisualizer } from './LinkedListVisualizer';
 
 interface UnifiedVisualizerProps {
     heap: Record<string, any>;
@@ -447,7 +448,18 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
                 const isArray = Array.isArray(value);
                 const isTree = value && typeof value === 'object' && (value.__viz_type === 'treenode' || 'left' in value || 'right' in value);
-                const isSLL = value && typeof value === 'object' && (value.__viz_type === 'node' || 'next' in value);
+                // Enhanced check: accept if __viz_type is node, OR if it has 'val' and ('next' is present or null)
+                // Note: 'next' in value is true even if value.next is null.
+                const isSLL = (value && typeof value === 'object' && (
+                    value.__viz_type === 'node' ||
+                    ('val' in value && 'next' in value) ||
+                    ('value' in value && 'next' in value)
+                )) || (varName === 'head' || varName === 'prev' || varName === 'curr' || varName === 'node');
+
+                // DEBUG LOGGING
+                if (varName === 'head' || varName === 'prev') {
+                    console.log(`[UnifiedVisualizer] ${varName}:`, value, { isArray, isTree, isSLL, hasNext: value && 'next' in value });
+                }
 
                 const commonProps = {
                     heap,
@@ -504,6 +516,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         );
                     } else if (isTree) {
                         Content = <TreeVisualizer {...commonProps} />;
+                    } else if (isSLL) {
+                        Content = <LinkedListVisualizer {...commonProps} />;
                     } else {
                         Content = <Visualizer {...commonProps} />;
                     }

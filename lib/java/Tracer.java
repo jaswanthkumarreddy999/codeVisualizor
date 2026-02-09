@@ -18,7 +18,7 @@ public class Tracer {
 
     private static VirtualMachine vm;
     private static Map<String, String> objIdMap = new HashMap<>(); 
-    private static Map<String, Object> store = new HashMap<>(); 
+    // private static Map<String, Object> store = new HashMap<>();  // Removed
     private static List<Map<String, Object>> history = new ArrayList<>();
     private static Set<String> recursing = new HashSet<>(); 
 
@@ -189,6 +189,7 @@ public class Tracer {
     private static void recordState(StackFrame frame, ThreadReference thread, String reason) {
         try {
             Map<String, Object> snapshot = new HashMap<>();
+            Map<String, Object> currentStore = new HashMap<>();
             
             // Stack
             List<Map<String, Object>> stackTrace = new ArrayList<>();
@@ -208,22 +209,22 @@ public class Tracer {
             try {
                 Map<LocalVariable, Value> visibleVariables = frame.getValues(frame.visibleVariables());
                 for (Map.Entry<LocalVariable, Value> entry : visibleVariables.entrySet()) {
-                    roots.put(entry.getKey().name(), serialize(entry.getValue()));
+                    roots.put(entry.getKey().name(), serialize(entry.getValue(), currentStore));
                 }
                 ReferenceType type = frame.location().declaringType();
                 for (Field field : type.visibleFields()) {
                     if (field.isStatic()) {
-                        roots.put(field.name(), serialize(type.getValue(field)));
+                        roots.put(field.name(), serialize(type.getValue(field), currentStore));
                     } else {
                         ObjectReference thisObj = frame.thisObject();
                         if (thisObj != null) {
-                            roots.put(field.name(), serialize(thisObj.getValue(field)));
+                            roots.put(field.name(), serialize(thisObj.getValue(field), currentStore));
                         }
                     }
                 }
             } catch (AbsentInformationException e) { }
             snapshot.put("roots", roots);
-            snapshot.put("store", new HashMap<>(store));
+            snapshot.put("store", currentStore);
             
             history.add(snapshot);
 
@@ -232,7 +233,7 @@ public class Tracer {
         }
     }
 
-    private static Object serialize(Value value) {
+    private static Object serialize(Value value, Map<String, Object> currentStore) {
         if (value == null) return null;
 
         if (value instanceof PrimitiveValue) {
@@ -250,17 +251,17 @@ public class Tracer {
         } else if (value instanceof ArrayReference) {
             ArrayReference arrayRef = (ArrayReference) value;
             String id = getObjectId(arrayRef);
-            if (!store.containsKey(id)) {
-                store.put(id, null); 
+            if (!currentStore.containsKey(id)) {
+                currentStore.put(id, null); 
                 List<Object> elements = new ArrayList<>();
                 for (Value v : arrayRef.getValues()) {
-                    elements.add(serialize(v));
+                    elements.add(serialize(v, currentStore));
                 }
                 Map<String, Object> arrayData = new HashMap<>();
                 arrayData.put("type", "array");
                 arrayData.put("value", elements);
                 arrayData.put("__viz_id", id);
-                store.put(id, arrayData);
+                currentStore.put(id, arrayData);
             }
             Map<String, String> ref = new HashMap<>();
             ref.put("__viz_ref", id);
@@ -273,12 +274,12 @@ public class Tracer {
                 ref.put("__viz_ref", id);
                 return ref;
             }
-            if (!store.containsKey(id)) {
+            if (!currentStore.containsKey(id)) {
                 recursing.add(id);
                 Map<String, Object> fields = new HashMap<>();
                 ReferenceType type = objRef.referenceType();
                 for (Field f : type.visibleFields()) {
-                    fields.put(f.name(), serialize(objRef.getValue(f)));
+                    fields.put(f.name(), serialize(objRef.getValue(f), currentStore));
                 }
                 Map<String, Object> objData = new HashMap<>();
                 objData.put("type", "object");
@@ -289,7 +290,7 @@ public class Tracer {
                     if (fields.containsKey("left")) objData.put("__viz_type", "treenode");
                     else if (fields.containsKey("next")) objData.put("__viz_type", "node");
                 }
-                store.put(id, objData);
+                currentStore.put(id, objData);
                 recursing.remove(id);
             }
             Map<String, String> ref = new HashMap<>();
