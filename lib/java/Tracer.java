@@ -1,6 +1,6 @@
 import com.sun.jdi.*;
 import com.sun.jdi.connect.Connector;
-import com.sun.jdi.connect.ListeningConnector;
+import com.sun.jdi.connect.LaunchingConnector;
 import com.sun.jdi.connect.IllegalConnectorArgumentsException;
 import com.sun.jdi.event.*;
 import com.sun.jdi.request.EventRequest;
@@ -34,78 +34,55 @@ public class Tracer {
         }
         String classPath = args[0];
         String mainClass = args[1];
-        TARGET_CLASS = mainClass;
+        TARGET_CLASS = mainClass.split(" ")[0]; // Handle args if any
 
-        // 1. Setup Listening Connector
-        ListeningConnector connector = null;
-        for (ListeningConnector lc : Bootstrap.virtualMachineManager().listeningConnectors()) {
-            if (lc.name().equals("com.sun.jdi.SocketListen")) {
-                connector = lc;
-                break;
-            }
+        // 1. Setup Launching Connector
+        LaunchingConnector connector = Bootstrap.virtualMachineManager().defaultConnector();
+        Map<String, Connector.Argument> arguments = connector.defaultArguments();
+
+        Connector.Argument mainArg = arguments.get("main");
+        if (mainArg == null) throw new RuntimeException("Bad LaunchingConnector: missing 'main' argument");
+        mainArg.setValue(mainClass);
+
+        Connector.Argument optionsArg = arguments.get("options");
+        if (optionsArg != null) {
+            // Add classpath to options
+            optionsArg.setValue("-cp \"" + classPath + "\" -Xmx64m");
         }
-        if (connector == null) throw new RuntimeException("No SocketListen connector found");
-
-        Map<String, Connector.Argument> connectorArgs = connector.defaultArguments();
-        connectorArgs.get("port").setValue("0"); // Ephemeral port
-        connectorArgs.get("localAddress").setValue("127.0.0.1");
-
-        String listeningAddress = connector.startListening(connectorArgs);
-        // listeningAddress is usually "127.0.0.1:45321" or similar
-        int portSeparator = listeningAddress.lastIndexOf(':');
-        String port = listeningAddress.substring(portSeparator + 1);
-        
-        System.err.println("Tracer listening on: " + listeningAddress);
 
         // 2. Launch Target Process
-        // Command: java -Xmx64m -agentlib:jdwp=transport=dt_socket,server=n,address=127.0.0.1:<port>,suspend=y -cp <cp> <main>
-        ProcessBuilder pb = new ProcessBuilder(
-            "java",
-            "-Xmx64m",
-            "-agentlib:jdwp=transport=dt_socket,server=n,address=127.0.0.1:" + port + ",suspend=y",
-            "-cp", classPath,
-            mainClass
-        );
-
-        // We want to capture the user process stdout/stderr
-        Process process = pb.start();
+        // LaunchingConnector handles creating the process and connecting to it.
+        vm = connector.launch(arguments);
+        
+        // 3. Capture Streams
+        Process process = vm.process();
         startStreamReaders(process);
-
-        // 3. Accept Connection (with retry for bad handshakes)
-        while (true) {
-            try {
-                vm = connector.accept(connectorArgs);
-                break; // Connection accepted!
-            } catch (IOException e) {
-                // Handshake failed (likely a probe). Ignore and retry.
-                System.err.println("Ignored invalid connection request: " + e.getMessage());
-            } catch (Exception e) {
-                System.err.println("Accept failed fatal: " + e.getMessage());
-                throw e;
-            }
-        }
-        connector.stopListening(connectorArgs);
 
         // 4. Setup Events
         EventRequestManager erm = vm.eventRequestManager();
+        
+        // We need to wait for ClassPrepare of the Main class to start stepping.
+        // Or simpler: just enable MethodEntry for Main.main?
+        // Let's stick to the previous robust pattern: ClassPrepare -> Breakpoint at main.
+        
         com.sun.jdi.request.ClassPrepareRequest classPrepareRequest = erm.createClassPrepareRequest();
         classPrepareRequest.addClassFilter(TARGET_CLASS);
         classPrepareRequest.enable();
-        
-        MethodEntryRequest methodEntryRequest = erm.createMethodEntryRequest();
-        methodEntryRequest.addClassFilter(TARGET_CLASS);
-        methodEntryRequest.enable();
 
         // 5. Run Event Loop
         runEventLoop(vm);
 
         // 6. Output Result
+        // Ensure we drain streams before printing
+        try {
+            // Give a small buffer for last output bytes
+            Thread.sleep(100); 
+        } catch (InterruptedException e) {}
+        
         printJsonResult();
         
-        // Ensure child process is killed if it's still running
-        if (process.isAlive()) {
-            process.destroyForcibly();
-        }
+        // Ensure child process is killed
+        process.destroyForcibly();
     }
 
     private static void startStreamReaders(Process process) {
