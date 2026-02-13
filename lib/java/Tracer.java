@@ -116,6 +116,20 @@ public class Tracer {
     private static void startStreamReaders(Process process) {
         new Thread(() -> readStream(process.getInputStream(), targetStdout)).start();
         new Thread(() -> readStream(process.getErrorStream(), targetStderr)).start();
+        
+        // Forward stdin from Tracer (System.in) to Target Process
+        new Thread(() -> {
+            try (InputStream in = System.in; java.io.OutputStream out = process.getOutputStream()) {
+                byte[] buffer = new byte[1024];
+                int len;
+                while ((len = in.read(buffer)) != -1) {
+                    out.write(buffer, 0, len);
+                    out.flush();
+                }
+            } catch (IOException e) {
+                 // Broken pipe or closed stream is expected when process ends
+            }
+        }).start();
     }
 
     private static void readStream(InputStream is, StringBuilder sb) {
@@ -248,8 +262,16 @@ public class Tracer {
             if (value instanceof CharValue) return String.valueOf(((CharValue) value).value());
             if (value instanceof ShortValue) return ((ShortValue) value).value();
             if (value instanceof LongValue) return ((LongValue) value).value(); 
-            if (value instanceof FloatValue) return ((FloatValue) value).value();
-            if (value instanceof DoubleValue) return ((DoubleValue) value).value();
+            if (value instanceof FloatValue) {
+                float f = ((FloatValue) value).value();
+                if (Float.isNaN(f) || Float.isInfinite(f)) return String.valueOf(f);
+                return f;
+            }
+            if (value instanceof DoubleValue) {
+                double d = ((DoubleValue) value).value();
+                if (Double.isNaN(d) || Double.isInfinite(d)) return String.valueOf(d);
+                return d;
+            }
             return value.toString();
         } else if (value instanceof StringReference) {
             return ((StringReference) value).value();
@@ -279,10 +301,16 @@ public class Tracer {
                 ref.put("__viz_ref", id);
                 return ref;
             }
+            // Skip system classes to avoid bloating output (e.g. Scanner, System, etc.)
+            ReferenceType type = objRef.referenceType();
+            if (type.name().startsWith("java.") || type.name().startsWith("sun.") || type.name().startsWith("jdk.")) {
+                 return type.name() + "@" + id; 
+            }
+
             if (!currentStore.containsKey(id)) {
                 recursing.add(id);
                 Map<String, Object> fields = new HashMap<>();
-                ReferenceType type = objRef.referenceType();
+                // ReferenceType type = objRef.referenceType(); // Already got it above
                 for (Field f : type.visibleFields()) {
                     fields.put(f.name(), serialize(objRef.getValue(f), currentStore));
                 }
@@ -366,6 +394,28 @@ public class Tracer {
 
     private static String escapeJson(String s) {
         if (s == null) return "";
-        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\': sb.append("\\\\"); break;
+                case '"': sb.append("\\\""); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 32) {
+                        String hex = Integer.toHexString(c);
+                        sb.append("\\u");
+                        for (int k = 0; k < 4 - hex.length(); k++) sb.append('0');
+                        sb.append(hex);
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
     }
 }

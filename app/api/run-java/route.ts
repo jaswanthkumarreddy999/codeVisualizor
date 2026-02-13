@@ -287,10 +287,37 @@ ${processedScript}
         await logDebug(`[${id}] ClassPath: ${classPath}`);
 
         try {
-            const { stdout, stderr } = await execAsync(`java --add-modules jdk.jdi -cp "${tracerClassPath}${sep}${classPath}" Tracer "${classPath}" Main`, {
-                timeout: 10000,
-                env: { ...process.env, JAVA_TOOL_OPTIONS: undefined, _JAVA_OPTIONS: undefined }
+            const runTracer = () => new Promise<{ stdout: string, stderr: string }>((resolve, reject) => {
+                // Remove JAVA_TOOL_OPTIONS and _JAVA_OPTIONS to prevent interference
+                const env = { ...process.env, JAVA_TOOL_OPTIONS: undefined, _JAVA_OPTIONS: undefined };
+
+                const child = exec(
+                    `java --add-modules jdk.jdi -cp "${tracerClassPath}${sep}${classPath}" Tracer "${classPath}" Main`,
+                    { timeout: 10000, env, maxBuffer: 50 * 1024 * 1024 },
+                    (error, stdout, stderr) => {
+                        if (error && !stdout) {
+                            // If there is stdout, it might be a valid execution with a non-zero exit code (e.g. Runtime Exception)
+                            // But here Tracer usually exits 0 if it caught the exception.
+                            // If error is present, it might be a timeout or specialized error.
+                            // We resolve with what we have, and let the JSON parser decide if it's valid.
+                            // However, if it's a timeout (signal SIGTERM), we should probably report it.
+                            reject({ error, stdout, stderr });
+                        } else {
+                            resolve({ stdout, stderr });
+                        }
+                    }
+                );
+
+                if (input) {
+                    // Append newline to ensure line-buffered inputs (like Scanner) don't hang waiting for delimiter
+                    child.stdin?.write(input.endsWith('\n') ? input : input + '\n');
+                    child.stdin?.end();
+                } else {
+                    child.stdin?.end();
+                }
             });
+
+            const { stdout, stderr } = await runTracer();
 
             // The Tracer output (stdout) IS the JSON result, which contains user's stdout/stderr/history
             let result: any = {};
@@ -333,10 +360,10 @@ ${processedScript}
             return NextResponse.json(result);
 
         } catch (err: any) {
-            console.error(`[${id}] Execution failed: ${err.message}`);
+            console.error(`[${id}] Execution failed: ${err.message || err.error?.message}`);
             return NextResponse.json({
                 error: "Execution Failed",
-                stderr: err.stderr || err.message
+                stderr: err.stderr || err.message || err.error?.message
             }, { status: 500 });
         }
 
