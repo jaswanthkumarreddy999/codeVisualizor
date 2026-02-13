@@ -118,7 +118,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         if (isOpen) {
             const savedProjects = localStorage.getItem('my-visualizer-projects');
             const savedFolders = localStorage.getItem('my-visualizer-folders');
-            const hasImportedNeetcodeV6 = localStorage.getItem('neetcode-imported-v6');
+            const hasImportedNeetcodeV6 = localStorage.getItem('neetcode-imported-v7');
 
             let currentProjects: SavedProject[] = [];
             let currentFolders: ProjectFolder[] = [];
@@ -133,7 +133,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
             // Seed NeetCode 150 (Split Version) and Basics
             if (!hasImportedNeetcodeV6) {
-                console.log("Seeding NeetCode 150 & Basics Projects (v6)...");
+                console.log("Seeding NeetCode 150 & Basics Projects (v7)...");
 
                 // Remove old NeetCode projects to avoid duplicates
                 currentProjects = currentProjects.filter(p => !p.id.startsWith('nc150-'));
@@ -154,7 +154,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                 // Save to storage
                 localStorage.setItem('my-visualizer-projects', JSON.stringify(currentProjects));
                 localStorage.setItem('my-visualizer-folders', JSON.stringify(currentFolders));
-                localStorage.setItem('neetcode-imported-v6', 'true'); // New flag
+                localStorage.setItem('neetcode-imported-v7', 'true'); // New flag
             } else if (!savedFolders) {
                 // Initialize default folders if just starting out but flag somehow set (unlikely) or normal init
                 currentFolders = DEFAULT_FOLDERS;
