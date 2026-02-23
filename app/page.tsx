@@ -117,7 +117,8 @@ function hydrateBackendHistory(history: any[]): StateSnapshot[] {
       stack: stack || {}, // Hydrate stack from step
       line: effectiveLine,
       description: `Line ${effectiveLine}`,
-      conditionResult: step.conditionResult
+      conditionResult: step.conditionResult,
+      stdout: step.stdout || ""
     };
   });
 }
@@ -730,7 +731,7 @@ export default function Home() {
                         readOnly
                         className="w-full h-full bg-transparent p-4 text-sm font-mono text-theme-primary focus:outline-none resize-none"
                         placeholder="Output will appear here..."
-                        value={outputVal}
+                        value={currentSnapshot?.stdout !== undefined ? currentSnapshot.stdout : outputVal}
                       />
                     </div>
                   ) : (
@@ -785,6 +786,7 @@ export default function Home() {
             <div className="flex-grow relative min-w-0">
               <UnifiedVisualizer
                 heap={currentSnapshot.heap}
+                stdout={currentSnapshot.stdout}
                 visualizedVariables={visualizedVariables}
                 onRemoveVariable={(name) => setVisualizedVariables(prev => prev.filter(v => v !== name))}
                 onAddVariable={(name) => setVisualizedVariables(prev => prev.includes(name) ? prev : [...prev, name])}

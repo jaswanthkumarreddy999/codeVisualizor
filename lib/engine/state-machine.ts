@@ -6,6 +6,7 @@ export interface StateSnapshot {
     line: number;
     description: string;
     conditionResult?: boolean;
+    stdout?: string;
 }
 
 export class ExecutionEngine {
@@ -80,7 +81,8 @@ export class ExecutionEngine {
                 stack: {},
                 line,
                 description: `${type} ${name}`,
-                conditionResult: type === 'condition' ? !!value : undefined
+                conditionResult: type === 'condition' ? !!value : undefined,
+                stdout: capturedOutput.join('\n')
             });
 
             return processedValue;

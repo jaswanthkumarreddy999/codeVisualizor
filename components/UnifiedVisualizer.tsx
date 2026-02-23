@@ -10,8 +10,13 @@ import { PrimitiveVisualizer } from './PrimitiveVisualizer';
 import { ArithmeticAnimator } from './ArithmeticAnimator';
 import { LinkedListVisualizer } from './LinkedListVisualizer';
 
+
+
+import { PrintAnimator } from './PrintAnimator';
+
 interface UnifiedVisualizerProps {
     heap: Record<string, any>;
+    stdout?: string;
     visualizedVariables: string[];
     onRemoveVariable: (name: string) => void;
     onAddVariable: (name: string) => void;
@@ -28,6 +33,7 @@ interface UnifiedVisualizerProps {
 
 export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
     heap,
+    stdout,
     visualizedVariables,
     onRemoveVariable,
     onAddVariable,
@@ -41,6 +47,29 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
     onPositionsChange,
     onClearAll
 }) => {
+    // Print Animation Logic
+    const [printAnimText, setPrintAnimText] = React.useState<string | null>(null);
+    const prevStdoutRef = React.useRef(stdout || "");
+
+    React.useEffect(() => {
+        const currentOut = stdout || "";
+        const prevOut = prevStdoutRef.current;
+
+        console.log("Stdout check:", { currentOut, prevOut });
+
+        if (currentOut.length > prevOut.length && currentOut.startsWith(prevOut)) {
+            const diff = currentOut.substring(prevOut.length).trim();
+            if (diff) {
+                setPrintAnimText(diff);
+            }
+        } else if (currentOut.length < prevOut.length) {
+            // Reset / Clear
+            setPrintAnimText(null);
+        }
+
+        prevStdoutRef.current = currentOut;
+    }, [stdout]);
+
     const [selectedVar, setSelectedVar] = React.useState<string | null>(null);
     const [viewModes, setViewModes] = React.useState<Record<string, 'bar' | 'box' | 'stack'>>({});
     const [explicitPointers, setExplicitPointers] = React.useState<Record<string, string[]>>({});
@@ -397,6 +426,14 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
             onDrop={handleDrop}
             onClick={() => setSelectedVar(null)}
         >
+            {/* Print Animation Layer */}
+            {printAnimText && (
+                <PrintAnimator
+                    text={printAnimText}
+                    onComplete={() => setPrintAnimText(null)}
+                />
+            )}
+
             {/* Arithmetic Animation Layer */}
             {activeAnim && (
                 <ArithmeticAnimator

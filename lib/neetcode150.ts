@@ -502,6 +502,16 @@ export const NEETCODE_150_PROJECTS: SavedProject[] = [
         "folderId": "basics"
     },
     {
+        "id": "nc150-basics-06_linear_search-1",
+        "name": "Linear Search",
+        "updatedAt": 1700000000000,
+        "code": "import java.util.*;\nimport java.util.concurrent.*;\nimport java.util.stream.*;\nimport java.io.*;\nimport java.math.*;\n\n// ================================================\n// Linear Search\n// ================================================\n\n\n\npublic class Main {\n    // Helper Methods\n        public static void main(String[] args) {\n        int[] arr = {4, 2, 7, 1, 9, 3};\n        int target = 7;\n        int foundIndex = -1;\n        for (int i = 0; i < arr.length; i++) {\n            if (arr[i] == target) {\n                foundIndex = i;\n                break;\n            }\n        }\n        if (foundIndex != -1) {\n            System.out.println(\"Found \" + target + \" at index \" + foundIndex);\n        } else {\n            System.out.println(target + \" not found\");\n        }\n    }\n}\n",
+        "language": "java",
+        "visualizedVariables": [],
+        "ignoredPointers": {},
+        "folderId": "basics"
+    },
+    {
         "id": "nc150-arrays-001_contains_duplicate-1",
         "name": "Contains Duplicate: Brute Force",
         "updatedAt": 1700000000000,

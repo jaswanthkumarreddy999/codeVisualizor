@@ -8,7 +8,6 @@ import com.sun.jdi.request.StepRequest;
 import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.EventRequestManager;
 import com.sun.jdi.request.MethodEntryRequest;
-import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.IOException;
@@ -133,11 +132,12 @@ public class Tracer {
     }
 
     private static void readStream(InputStream is, StringBuilder sb) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
+        try (InputStreamReader reader = new InputStreamReader(is)) {
+            char[] buffer = new char[1024];
+            int len;
+            while ((len = reader.read(buffer)) != -1) {
                 synchronized (sb) {
-                    sb.append(line).append("\n");
+                    sb.append(buffer, 0, len);
                 }
             }
         } catch (IOException e) { }
@@ -207,6 +207,10 @@ public class Tracer {
 
     private static void recordState(StackFrame frame, ThreadReference thread, String reason) {
         try {
+            // Give a small moment for stdout/stderr to be flushed from the target process pipe
+            // This prevents race conditions where we snapshot before catching the output of the just-executed line
+            try { Thread.sleep(100); } catch (InterruptedException e) {}
+
             Map<String, Object> snapshot = new HashMap<>();
             Map<String, Object> currentStore = new HashMap<>();
             
@@ -245,6 +249,11 @@ public class Tracer {
             snapshot.put("roots", roots);
             snapshot.put("store", currentStore);
             
+            // Capture Stdout
+            synchronized (targetStdout) {
+                snapshot.put("stdout", targetStdout.toString());
+            }
+
             history.add(snapshot);
 
         } catch (Exception e) {
