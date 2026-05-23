@@ -38,7 +38,9 @@ export const WatchWindow: React.FC<WatchWindowProps> = ({ heap, stack }) => {
                                             : `Array(${value.length})`
                                         : value.__viz_type === 'hashmap'
                                             ? `HashMap(${Object.keys(value).filter(k => k !== '__viz_type' && k !== '__viz_id').length})`
-                                            : '{ ... }'
+                                            : Array.isArray(value) && (value as any).__viz_type === 'hashset'
+                                                ? `HashSet(${value.length})`
+                                                : '{ ... }'
                                     : String(value)}
                             </span>
                         </div>

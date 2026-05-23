@@ -311,10 +311,11 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     const isTree = value && typeof value === 'object' && (value.__viz_type === 'treenode' || 'left' in value || 'right' in value);
                     const isSLL = value && typeof value === 'object' && (value.__viz_type === 'node' || 'next' in value);
                     const isHashMap = value && typeof value === 'object' && !Array.isArray(value) && value.__viz_type === 'hashmap';
+                    const isHashSet = Array.isArray(value) && (value as any).__viz_type === 'hashset';
 
                     return {
                         ...prevSizes,
-                        [varName]: (isArray || isMatrix || isTree || isSLL || isHashMap)
+                        [varName]: (isArray || isMatrix || isTree || isSLL || isHashMap || isHashSet)
                             ? { width: 600, height: 500 }
                             : { width: 150, height: 120 }
                     };
@@ -583,7 +584,9 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     } else if (isSLL) {
                         Content = <LinkedListVisualizer {...commonProps} />;
                     } else if (isHashMap) {
-                        Content = <HashMapVisualizer {...commonProps} />;
+                        Content = <HashMapVisualizer heap={heap} variableName={varName} />;
+                    } else if (isHashSet) {
+                        Content = <HashSetVisualizer heap={heap} variableName={varName} />;
                     } else {
                         Content = <Visualizer {...commonProps} />;
                     }
