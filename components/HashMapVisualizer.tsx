@@ -67,12 +67,9 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                 {entries.length > 0 ? (
                     <motion.div
                         className="relative rounded-xl overflow-hidden"
-                        animate={{
-                            boxShadow: changedKey
-                                ? '0 0 0 2px var(--accent), 0 0 20px var(--accent-light)'
-                                : '0 0 0 1px rgba(255,255,255,0.08)',
+                        style={{
+                            boxShadow: '0 0 0 2px var(--accent), 0 0 20px var(--accent-light)',
                         }}
-                        transition={{ duration: 0.2 }}
                     >
                         <table className="w-full border-collapse font-mono text-sm">
                             <thead>
