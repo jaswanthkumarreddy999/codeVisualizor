@@ -21,6 +21,16 @@ const logDebug = async (msg: string) => {
  * stepper can see loop variables in scope on every step.
  */
 function formatJavaCode(code: string): string {
+    // Only format if the code is essentially single-line (collapsed).
+    // If the user already wrote multi-line code, don't reformat — it would
+    // change line numbers and break the tracer line mapping.
+    const meaningfulLines = code.split('\n').filter(l => {
+        const t = l.trim();
+        return t.length > 0 && !t.startsWith('import ') && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*');
+    });
+    // If there are already more than 4 meaningful lines, code is already formatted
+    if (meaningfulLines.length > 4) return code;
+
     // ── Step 1: Tokenize ──────────────────────────────────────────────────────
     // Tokens are: text chunks, '{', '}', ';'
     // Special handling: when we see for/while/if followed by '(', we read the
@@ -512,8 +522,15 @@ ${processedScript}
 `;
         } // End of wrapping logic
 
-        // Re-format after instrumentation to ensure multi-line structure for JDI line numbers
-        processedCode = formatJavaCode(processedCode);
+        // Re-format after instrumentation only if the original code was single-line.
+        // For already-formatted multi-line code, the formatter would change line numbers.
+        const wasAlreadyFormatted = code.split('\n').filter((l: string) => {
+            const t = l.trim();
+            return t.length > 0 && !t.startsWith('import ') && !t.startsWith('//') && !t.startsWith('/*') && !t.startsWith('*');
+        }).length > 4;
+        if (!wasAlreadyFormatted) {
+            processedCode = formatJavaCode(processedCode);
+        }
 
         filePath = join(tmpDir, 'Main.java');
         classPath = tmpDir; // Where .class will live
