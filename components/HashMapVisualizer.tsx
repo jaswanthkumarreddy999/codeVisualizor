@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface HashMapVisualizerProps {
     heap: Record<string, any>;
@@ -11,7 +11,6 @@ interface HashMapVisualizerProps {
 export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, variableName }) => {
     const raw = heap[variableName];
 
-    // Extract key-value pairs — skip internal metadata fields
     const entries: [string, any][] = raw && typeof raw === 'object'
         ? Object.entries(raw).filter(([k]) => k !== '__viz_type' && k !== '__viz_id')
         : [];
@@ -21,6 +20,34 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
         if (typeof v === 'object') return JSON.stringify(v);
         return String(v);
     };
+
+    // Track which key's value changed most recently for row highlight
+    const prevEntriesRef = React.useRef<Record<string, string>>({});
+    const [changedKey, setChangedKey] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        const prev = prevEntriesRef.current;
+        let changed: string | null = null;
+
+        for (const [k, v] of entries) {
+            const formatted = formatValue(v);
+            if (prev[k] !== formatted) {
+                changed = k;
+                break;
+            }
+        }
+
+        if (changed) {
+            setChangedKey(changed);
+            const t = setTimeout(() => setChangedKey(null), 600);
+            return () => clearTimeout(t);
+        }
+
+        // Update ref
+        const next: Record<string, string> = {};
+        for (const [k, v] of entries) next[k] = formatValue(v);
+        prevEntriesRef.current = next;
+    }, [entries.map(([k, v]) => `${k}:${formatValue(v)}`).join(',')]);
 
     return (
         <div className="relative w-full h-full overflow-hidden p-6 flex flex-col bg-theme-main">
@@ -35,49 +62,73 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                 </span>
             </div>
 
-            {/* Table */}
+            {/* Table with animated border */}
             <div className="flex-grow overflow-auto">
                 {entries.length > 0 ? (
-                    <table className="w-full border-collapse font-mono text-sm">
-                        <thead>
-                            <tr className="border-b border-theme">
-                                <th className="text-left text-[10px] uppercase tracking-widest text-theme-secondary font-bold pb-2 pr-4 w-1/2">
-                                    Key
-                                </th>
-                                <th className="text-left text-[10px] uppercase tracking-widest text-theme-secondary font-bold pb-2 w-1/2">
-                                    Value
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {entries.map(([key, value], idx) => (
-                                <tr
-                                    key={key}
-                                    className={`border-b border-theme/50 transition-colors ${
-                                        idx % 2 === 0 ? 'bg-theme-tertiary/10' : ''
-                                    }`}
-                                >
-                                    {/* Key cell — stable, no animation */}
-                                    <td className="py-2 pr-4 text-accent font-bold truncate max-w-0">
-                                        {String(key)}
-                                    </td>
-
-                                    {/* Value cell — animates only when value changes */}
-                                    <td className="py-2 text-theme-primary font-semibold truncate max-w-0">
-                                        <motion.span
-                                            key={`${key}-${formatValue(value)}`}
-                                            initial={{ opacity: 0.3, x: -4 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ duration: 0.2 }}
-                                            className="inline-block"
-                                        >
-                                            {formatValue(value)}
-                                        </motion.span>
-                                    </td>
+                    <motion.div
+                        className="relative rounded-xl overflow-hidden"
+                        animate={{
+                            boxShadow: changedKey
+                                ? '0 0 0 2px var(--accent), 0 0 20px var(--accent-light)'
+                                : '0 0 0 1px rgba(255,255,255,0.08)',
+                        }}
+                        transition={{ duration: 0.2 }}
+                    >
+                        <table className="w-full border-collapse font-mono text-sm">
+                            <thead>
+                                <tr className="bg-theme-tertiary/40">
+                                    <th className="text-left text-[10px] uppercase tracking-widest text-theme-secondary font-bold px-4 py-2.5 w-1/2 border-b border-theme">
+                                        Key
+                                    </th>
+                                    <th className="text-left text-[10px] uppercase tracking-widest text-theme-secondary font-bold px-4 py-2.5 w-1/2 border-b border-theme border-l border-theme">
+                                        Value
+                                    </th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody>
+                                <AnimatePresence initial={false}>
+                                    {entries.map(([key, value], idx) => {
+                                        const isChanged = changedKey === key;
+                                        return (
+                                            <motion.tr
+                                                key={key}
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ duration: 0.2, delay: idx * 0.03 }}
+                                                className={`border-b border-theme/40 transition-colors duration-200 ${
+                                                    isChanged
+                                                        ? 'bg-accent/10'
+                                                        : idx % 2 === 0
+                                                            ? 'bg-theme-tertiary/10'
+                                                            : ''
+                                                }`}
+                                            >
+                                                {/* Key */}
+                                                <td className="px-4 py-2.5 text-accent font-bold">
+                                                    {String(key)}
+                                                </td>
+
+                                                {/* Value — animates on change */}
+                                                <td className="px-4 py-2.5 border-l border-theme/40">
+                                                    <motion.span
+                                                        key={`${key}-${formatValue(value)}`}
+                                                        initial={{ opacity: 0, scale: 0.85, x: -6 }}
+                                                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                                                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                                                        className={`inline-block font-semibold ${
+                                                            isChanged ? 'text-accent' : 'text-theme-primary'
+                                                        }`}
+                                                    >
+                                                        {formatValue(value)}
+                                                    </motion.span>
+                                                </td>
+                                            </motion.tr>
+                                        );
+                                    })}
+                                </AnimatePresence>
+                            </tbody>
+                        </table>
+                    </motion.div>
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <div className="text-theme-secondary font-mono text-sm border-2 border-dashed border-theme rounded-xl p-8 text-center opacity-50">
