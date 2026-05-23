@@ -10,6 +10,7 @@ import { PrimitiveVisualizer } from './PrimitiveVisualizer';
 import { ArithmeticAnimator } from './ArithmeticAnimator';
 import { LinkedListVisualizer } from './LinkedListVisualizer';
 import { MatrixVisualizer } from './MatrixVisualizer';
+import { HashSetVisualizer } from './HashSetVisualizer';
 
 
 
@@ -504,6 +505,9 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     value.__viz_type === 'hashmap'
                 );
 
+                // HashSet: JS array with __viz_type = 'hashset' set as non-enumerable property
+                const isHashSet = Array.isArray(value) && (value as any).__viz_type === 'hashset';
+
                 const commonProps = {
                     heap,
                     variableName: varName,
@@ -520,7 +524,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                 // Base positioning classes
                 const BaseClasses = "absolute top-0 left-0";
 
-                if (!isArray && !isTree && !isSLL && !isHashMap) {
+                if (!isArray && !isTree && !isSLL && !isHashMap && !isHashSet) {
                     // Simple Value
                     Content = (
                         <PrimitiveVisualizer
@@ -597,7 +601,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     );
                 }
 
-                const defaultSize = (isArray || isMatrix || isTree || isSLL || isHashMap) ? { width: 600, height: 500 } : { width: 150, height: 120 };
+                const defaultSize = (isArray || isMatrix || isTree || isSLL || isHashMap || isHashSet) ? { width: 600, height: 500 } : { width: 150, height: 120 };
                 const currentSize = sizes[varName] || defaultSize;
 
                 return (

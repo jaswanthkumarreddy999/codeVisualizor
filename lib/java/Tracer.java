@@ -346,16 +346,83 @@ public class Tracer {
                 return ref;
             }
             // Skip system classes to avoid bloating output (e.g. Scanner, System, etc.)
-            // BUT: special-case java.util.Map implementations — serialize their entries
+            // BUT: special-case java.util.Map and java.util.Set — serialize their contents
             ReferenceType type = objRef.referenceType();
             boolean isMap = false;
+            boolean isSet = false;
             try {
                 if (type instanceof ClassType) {
                     for (InterfaceType iface : ((ClassType) type).allInterfaces()) {
                         if (iface.name().equals("java.util.Map")) { isMap = true; break; }
+                        if (iface.name().equals("java.util.Set")) { isSet = true; break; }
                     }
                 }
             } catch (Exception ignored) {}
+
+            // Serialize java.util.Set (HashSet, LinkedHashSet, TreeSet, etc.)
+            if (isSet) {
+                if (!currentStore.containsKey(id)) {
+                    currentStore.put(id, null);
+                    List<Object> elements = new ArrayList<>();
+                    try {
+                        // HashSet internally uses a HashMap — read its 'map' field
+                        // then read the map's 'table' array and collect keys
+                        Field mapField = null;
+                        for (Field f : type.allFields()) {
+                            if (f.name().equals("map") || f.name().equals("m") || f.name().equals("backingMap")) {
+                                mapField = f; break;
+                            }
+                        }
+                        if (mapField != null) {
+                            Value mapVal = objRef.getValue(mapField);
+                            if (mapVal instanceof ObjectReference) {
+                                ObjectReference innerMap = (ObjectReference) mapVal;
+                                ReferenceType mapType = innerMap.referenceType();
+                                Field tableField = null;
+                                for (Field f : mapType.allFields()) {
+                                    if (f.name().equals("table")) { tableField = f; break; }
+                                }
+                                if (tableField != null) {
+                                    Value tableVal = innerMap.getValue(tableField);
+                                    if (tableVal instanceof ArrayReference) {
+                                        ArrayReference table = (ArrayReference) tableVal;
+                                        for (Value slot : table.getValues()) {
+                                            if (!(slot instanceof ObjectReference)) continue;
+                                            ObjectReference node = (ObjectReference) slot;
+                                            int chainLimit = 0;
+                                            while (node != null && chainLimit++ < 100) {
+                                                ReferenceType nodeType = node.referenceType();
+                                                Field keyField = null, nextField = null;
+                                                for (Field f : nodeType.allFields()) {
+                                                    if (f.name().equals("key")) keyField = f;
+                                                    else if (f.name().equals("next")) nextField = f;
+                                                }
+                                                if (keyField != null) {
+                                                    Value k = node.getValue(keyField);
+                                                    elements.add(serialize(k, currentStore));
+                                                }
+                                                if (nextField != null) {
+                                                    Value nextVal = node.getValue(nextField);
+                                                    node = (nextVal instanceof ObjectReference) ? (ObjectReference) nextVal : null;
+                                                } else { node = null; }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) { /* fallback: empty set */ }
+                    Map<String, Object> setData = new LinkedHashMap<>();
+                    setData.put("type", "hashset");
+                    setData.put("__viz_type", "hashset");
+                    setData.put("value", elements);
+                    setData.put("__viz_id", id);
+                    currentStore.put(id, setData);
+                }
+                Map<String, String> ref = new HashMap<>();
+                ref.put("__viz_ref", id);
+                return ref;
+            }
 
             if (isMap) {
                 if (!currentStore.containsKey(id)) {

@@ -24,8 +24,12 @@ export function hydrateBackendHistory(history: any[], code?: string): StateSnaps
   const foreachMap = code ? parseForeachRelationships(code) : {};
 
   // Track last known values for variables that temporarily go out of scope
-  // (e.g. for-each loop variable disappears on the loop header step)
   const lastKnownHeap: Record<string, any> = {};
+
+  // Track iteration index for each for-each variable
+  // Increments each time the variable appears in scope (i.e. on body steps)
+  const foreachIterIndex: Record<string, number> = {};
+  const foreachLastValue: Record<string, any> = {}; // last seen value to detect new iteration
 
   return history.map((snapshot) => {
     const store = snapshot.store || {};
@@ -45,6 +49,17 @@ export function hydrateBackendHistory(history: any[], code?: string): StateSnaps
               Object.entries(obj.value).forEach(([k, v]) => {
                 resolved[k] = resolveValue(v);
               });
+            }
+            return resolved;
+          }
+
+          // HashSet: return as a JS array tagged with __viz_type = 'hashset'
+          if (obj.type === 'hashset' || obj.__viz_type === 'hashset') {
+            const resolved: any[] = [];
+            (resolved as any).__viz_type = 'hashset';
+            (resolved as any).__viz_id = refId;
+            if (Array.isArray(obj.value)) {
+              obj.value.forEach((item: any) => resolved.push(resolveValue(item)));
             }
             return resolved;
           }
@@ -91,14 +106,28 @@ export function hydrateBackendHistory(history: any[], code?: string): StateSnaps
       lastKnownHeap[key] = val;
     });
 
-    // Tag for-each iterator variables so ArrayVisualizer knows they are
-    // value-iterators, not index pointers.
-    // We wrap the primitive in a special object: { __viz_foreach_of: 'arr', value: 3 }
+    // Tag for-each iterator variables with their current iteration INDEX (not value).
+    // This lets ArrayVisualizer highlight by position, not by value match.
+    // We detect a new iteration when the variable is present in roots (not carried forward)
+    // AND its value changed from the last time it was in scope.
     Object.entries(foreachMap).forEach(([iterVar, arrayVar]) => {
       if (iterVar in heap && typeof heap[iterVar] !== 'object') {
+        const currentVal = heap[iterVar];
+        const isInRoots = iterVar in roots; // directly from tracer, not carried forward
+
+        if (isInRoots) {
+          // Variable is in scope — check if it's a new iteration (value changed)
+          if (foreachLastValue[iterVar] !== currentVal || !(iterVar in foreachIterIndex)) {
+            // New iteration: increment index
+            foreachIterIndex[iterVar] = (foreachIterIndex[iterVar] ?? -1) + 1;
+            foreachLastValue[iterVar] = currentVal;
+          }
+        }
+
         heap[iterVar] = {
           __viz_foreach_of: arrayVar,
-          value: heap[iterVar]
+          __viz_foreach_index: foreachIterIndex[iterVar] ?? 0,
+          value: currentVal
         };
       }
     });
