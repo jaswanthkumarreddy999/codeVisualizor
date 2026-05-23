@@ -208,10 +208,6 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                                 borderRadius: waterHeightPct > 0 ? '0 0 4px 4px' : '4px 4px 0 0',
                                                 opacity: isActive ? 1 : 0.8
                                             }}
-                                            style={{
-                                                borderRadius: waterHeightPct > 0 ? '0 0 4px 4px' : '4px 4px 0 0',
-                                                opacity: isActive ? 1 : 0.8
-                                            }}
                                         >
                                             {/* Value Label - Condition to show inside or above */}
                                             {heightPct > 15 ? (

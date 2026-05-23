@@ -184,13 +184,12 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         const newProject: SavedProject = {
             id: nanoid(),
             name: newProjectName.trim(),
-            updatedAt: Date.now(),
+            lastModified: Date.now(),
             code: currentCode,
             language: currentLanguage,
             visualizedVariables: currentVisualizedVars,
             ignoredPointers: currentIgnoredPointers,
             positions: currentPositions,
-            folderId: savingToFolderId || currentFolderId || undefined
         };
 
         const updatedProjects = [newProject, ...projects];
@@ -484,7 +483,7 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
                 <h3 className="font-bold text-lg mb-1 truncate text-theme-primary" title={project.name}>{project.name}</h3>
                 <p className="text-xs text-theme-secondary mb-6">
-                    Last updated {formatDate(project.updatedAt)}
+                    Last updated {formatDate(project.updatedAt ?? project.lastModified ?? 0)}
                 </p>
 
                 <div className="mt-auto flex gap-2 pt-4 border-t border-theme">

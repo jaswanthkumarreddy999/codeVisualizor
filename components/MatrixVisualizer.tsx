@@ -27,7 +27,7 @@ function resolveMatrix(value: any): { rows: any[][]; rowIds: string[] } {
     for (const row of outerArr) {
         if (Array.isArray(row)) {
             rows.push([...row]);
-            rowIds.push(row.__viz_id || String(rows.length));
+            rowIds.push((row as any).__viz_id || String(rows.length));
         } else if (row && typeof row === 'object' && Array.isArray(row.data)) {
             // Hydrated form: { __viz_type: 'array', data: [...], __viz_id: '...' }
             rows.push([...row.data]);

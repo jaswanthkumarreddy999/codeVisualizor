@@ -25,7 +25,9 @@ export interface SavedProject {
   visualizedVariables: string[];
   visualizerPositions?: Record<string, { x: number; y: number }>;
   ignoredPointers: Record<string, string[]>;
-  lastModified: number;
+  lastModified?: number;
+  updatedAt?: number;
+  folderId?: string;
   // Legacy support
   positions?: Record<string, { x: number; y: number }>;
 }
