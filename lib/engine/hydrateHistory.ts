@@ -31,7 +31,7 @@ export function hydrateBackendHistory(history: any[], code?: string): StateSnaps
   const foreachIterIndex: Record<string, number> = {};
   const foreachLastValue: Record<string, any> = {}; // last seen value to detect new iteration
 
-  return history.map((snapshot, idx) => {
+  return history.map((snapshot) => {
     const store = snapshot.store || {};
     const roots = snapshot.roots || {};
     const heap: Record<string, any> = {};
@@ -136,10 +136,7 @@ export function hydrateBackendHistory(history: any[], code?: string): StateSnaps
       line: snapshot.line,
       heap,
       stack: snapshot.stack || [],
-      // Use the NEXT snapshot's stdout so output appears when the line that produced it
-      // is the current highlighted line (JDI captures stdout before line executes,
-      // so next step's stdout = what the current line just printed)
-      stdout: (history[idx + 1]?.stdout) ?? (snapshot.stdout || ''),
+      stdout: snapshot.stdout || '',
       description: snapshot.description || ''
     };
   });
