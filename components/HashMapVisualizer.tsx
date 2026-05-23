@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 interface HashMapVisualizerProps {
     heap: Record<string, any>;
@@ -77,13 +77,8 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                         }`}>
                             <AnimatePresence mode="popLayout">
                                 {bucket.entries.map(([key, value]) => (
-                                    <motion.div
+                                    <div
                                         key={key}
-                                        layoutId={`hm-${variableName}-${key}`}
-                                        initial={{ opacity: 0, scale: 0.8, y: -8 }}
-                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                        exit={{ opacity: 0, scale: 0.7, transition: { duration: 0.15 } }}
-                                        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                                         className="rounded-lg border border-accent/40 bg-accent/10 p-1.5 flex flex-col gap-0.5"
                                     >
                                         {/* Key */}
@@ -92,16 +87,17 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                                         </div>
                                         {/* Separator */}
                                         <div className="w-full h-px bg-accent/20" />
-                                        {/* Value */}
+                                        {/* Value — only animate when value changes */}
                                         <motion.div
                                             key={`${key}-${formatValue(value)}`}
-                                            initial={{ opacity: 0, scale: 0.8 }}
+                                            initial={{ opacity: 0.4, scale: 0.9 }}
                                             animate={{ opacity: 1, scale: 1 }}
+                                            transition={{ duration: 0.15 }}
                                             className="text-theme-primary text-[11px] font-mono truncate leading-tight font-semibold"
                                         >
                                             {formatValue(value)}
                                         </motion.div>
-                                    </motion.div>
+                                    </div>
                                 ))}
                             </AnimatePresence>
 
