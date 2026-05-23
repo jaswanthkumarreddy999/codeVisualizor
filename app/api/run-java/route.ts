@@ -520,6 +520,24 @@ ${processedScript}
 
         await writeFile(filePath, processedCode);
 
+        // Compute line offset: the formatter/instrumentation may add lines before main()
+        // so tracer line numbers need to be adjusted back to match the original editor lines.
+        const computeLineOffset = (original: string, processed: string): number => {
+            // Find the line number of "public static void main" in both versions
+            const findMainLine = (src: string) => {
+                const lines = src.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                    if (/public\s+static\s+void\s+main\s*\(/.test(lines[i])) return i + 1; // 1-indexed
+                }
+                return -1;
+            };
+            const origLine = findMainLine(original);
+            const procLine = findMainLine(processed);
+            if (origLine === -1 || procLine === -1) return 0;
+            return procLine - origLine;
+        };
+        const lineOffset = computeLineOffset(code, processedCode);
+
         // Compile
         try {
             await execAsync(`javac --release 17 -g "${filePath}"`);
@@ -613,6 +631,9 @@ ${processedScript}
             // Debug logging for production:
             if (result.stdout) console.log(`[${id}] Java stdout length: ${result.stdout.length}`);
             if (result.stderr) console.log(`[${id}] Java stderr size: ${result.stderr.length}`);
+
+            // Attach line offset so frontend can map tracer lines back to original editor lines
+            result.lineOffset = lineOffset;
 
             return NextResponse.json(result);
 
