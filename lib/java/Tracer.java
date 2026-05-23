@@ -199,7 +199,7 @@ public class Tracer {
                                 connected = false;
                             }
                         }
-                        // If we're inside a skipped method (e.g. traceCondition), just resume —
+                        // If we're inside a skipped method (e.g. traceCondition), just resume -
                         // the stepper will naturally return to user code on the next step event.
                     }
                     else if (event instanceof MethodEntryEvent) {
@@ -230,7 +230,7 @@ public class Tracer {
     }
 
     // Variables that are internal/noise and should not appear in the heap.
-    // Only filter "args" (the main method's String[] args parameter) — never filter
+    // Only filter "args" (the main method's String[] args parameter) - never filter
     // single-letter names like "b" which are valid user variable names.
     private static final Set<String> HIDDEN_VARS = new HashSet<>(Arrays.asList("args", "__viz_b"));
 
@@ -239,7 +239,7 @@ public class Tracer {
             Map<String, Object> snapshot = new HashMap<>();
             Map<String, Object> currentStore = new HashMap<>();
 
-            // Stack — filter out traceCondition and other internal helpers
+            // Stack - filter out traceCondition and other internal helpers
             List<Map<String, Object>> stackTrace = new ArrayList<>();
             for (StackFrame f : thread.frames()) {
                 String declType = f.location().declaringType().name();
@@ -257,7 +257,7 @@ public class Tracer {
             snapshot.put("stack", stackTrace);
             snapshot.put("line", frame.location().lineNumber());
 
-            // Roots — collect visible variables, filtering out internal noise
+            // Roots - collect visible variables, filtering out internal noise
             Map<String, Object> roots = new HashMap<>();
             try {
                 Map<LocalVariable, Value> visibleVariables = frame.getValues(frame.visibleVariables());

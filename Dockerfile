@@ -20,7 +20,7 @@ RUN npm ci
 COPY . .
 
 # Compile Tracer.java (Java 17) with JDI module added
-RUN javac --add-modules jdk.jdi lib/java/Tracer.java
+RUN javac -encoding UTF-8 --add-modules jdk.jdi lib/java/Tracer.java
 
 
 # Build Next.js app
