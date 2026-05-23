@@ -309,7 +309,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     );
                     const isTree = value && typeof value === 'object' && (value.__viz_type === 'treenode' || 'left' in value || 'right' in value);
                     const isSLL = value && typeof value === 'object' && (value.__viz_type === 'node' || 'next' in value);
-                    const isHashMap = value && typeof value === 'object' && (value.__viz_type === 'hashmap');
+                    const isHashMap = value && typeof value === 'object' && !Array.isArray(value) && value.__viz_type === 'hashmap';
 
                     return {
                         ...prevSizes,
@@ -500,10 +500,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     ('value' in value && 'next' in value)
                 )) || (varName === 'head' || varName === 'prev' || varName === 'curr' || varName === 'node');
 
-                const isHashMap = value && typeof value === 'object' && (
-                    value.__viz_type === 'hashmap' || 
-                    (value.constructor && value.constructor.name === 'Map') ||
-                    (value.entries && typeof value.entries === 'function')
+                const isHashMap = value && typeof value === 'object' && !Array.isArray(value) && (
+                    value.__viz_type === 'hashmap'
                 );
 
                 const commonProps = {

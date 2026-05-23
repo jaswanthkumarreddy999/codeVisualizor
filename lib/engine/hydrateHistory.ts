@@ -37,6 +37,18 @@ export function hydrateBackendHistory(history: any[], code?: string): StateSnaps
         const refId = val.__viz_ref;
         if (store[refId]) {
           const obj = store[refId];
+
+          // HashMap: return as a plain object tagged with __viz_type = 'hashmap'
+          if (obj.type === 'hashmap' || obj.__viz_type === 'hashmap') {
+            const resolved: Record<string, any> = { __viz_type: 'hashmap', __viz_id: refId };
+            if (obj.value && typeof obj.value === 'object') {
+              Object.entries(obj.value).forEach(([k, v]) => {
+                resolved[k] = resolveValue(v);
+              });
+            }
+            return resolved;
+          }
+
           const resolved: any = Array.isArray(obj.value) ? [] : {};
 
           // Reconstruct with metadata

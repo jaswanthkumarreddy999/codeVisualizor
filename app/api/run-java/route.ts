@@ -21,10 +21,6 @@ const logDebug = async (msg: string) => {
  * stepper can see loop variables in scope on every step.
  */
 function formatJavaCode(code: string): string {
-    // If the code already has multiple non-import lines, it's already formatted
-    const nonImportLines = code.split('\n').filter(l => l.trim().length > 0 && !l.trim().startsWith('import ') && !l.trim().startsWith('//'));
-    if (nonImportLines.length > 5) return code;
-
     // ── Step 1: Tokenize ──────────────────────────────────────────────────────
     // Tokens are: text chunks, '{', '}', ';'
     // Special handling: when we see for/while/if followed by '(', we read the
@@ -165,11 +161,13 @@ function formatJavaCode(code: string): string {
         }
 
         if (ch === '{' || ch === '}' || ch === ';') {
-            // Check if '{' is an array/object initializer (preceded by '=' or 'new ...[')
-            // In that case, read the whole { ... } as part of current token
+            // Check if '{' is an array/object initializer (preceded by '=' or 'new Type[]')
+            // Do NOT treat method/constructor signatures ending with ')' as initializers
             if (ch === '{') {
                 const prev = current.trim();
-                const isInitializer = prev.endsWith('=') || prev.endsWith(']') || prev.endsWith(')') || /new\s+\w+(\[\])+\s*$/.test(prev) || /=\s*$/.test(prev);
+                const isInitializer = /=\s*$/.test(prev) ||           // assignment: int[] a = {
+                    /new\s+[\w<>\[\]]+\s*\[\s*\]\s*$/.test(prev) ||   // new int[] {
+                    /new\s+[\w<>\[\]]+\s*\[\d*\]\s*$/.test(prev);     // new int[5] {
                 if (isInitializer) {
                     // Read the entire initializer block as one token
                     let block = '{'; i++;
@@ -324,7 +322,7 @@ export async function POST(req: Request) {
 
             if (lastMatchIndex !== -1) {
                 processedCode = processedCode.substring(0, lastMatchIndex) +
-                    ` public static boolean traceCondition(boolean __viz_b) { return __viz_b; } ` +
+                    '\n    public static boolean traceCondition(boolean __viz_b) { return __viz_b; }\n' +
                     processedCode.substring(lastMatchIndex);
             }
 
@@ -514,6 +512,9 @@ ${processedScript}
 `;
         } // End of wrapping logic
 
+        // Re-format after instrumentation to ensure multi-line structure for JDI line numbers
+        processedCode = formatJavaCode(processedCode);
+
         filePath = join(tmpDir, 'Main.java');
         classPath = tmpDir; // Where .class will live
 
@@ -581,9 +582,6 @@ ${processedScript}
 
             // logDebug(`[${id}] Tracer Output: ${output}`);
 
-            // Debug: log raw output length
-            console.log(`[${id}] Tracer raw stdout length: ${output.length}, jsonStart: ${output.indexOf('{')}, jsonEnd: ${output.lastIndexOf('}')}`);
-            
             // Parse valid JSON from output (it might contain other noise if JVM prints stuff)
             const jsonStart = output.indexOf('{');
             const jsonEnd = output.lastIndexOf('}');

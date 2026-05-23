@@ -17,9 +17,9 @@ public class Tracer {
 
     private static VirtualMachine vm;
     private static Map<String, String> objIdMap = new HashMap<>(); 
-    // private static Map<String, Object> store = new HashMap<>();  // Removed
     private static List<Map<String, Object>> history = new ArrayList<>();
     private static Set<String> recursing = new HashSet<>(); 
+    private static ThreadReference lastThread = null; // used for Map.toString() invocation
 
     private static String TARGET_CLASS = "Main";
 
@@ -236,6 +236,7 @@ public class Tracer {
 
     private static void recordState(StackFrame frame, ThreadReference thread, String reason) {
         try {
+            lastThread = thread; // save for Map serialization
             Map<String, Object> snapshot = new HashMap<>();
             Map<String, Object> currentStore = new HashMap<>();
 
@@ -345,9 +346,115 @@ public class Tracer {
                 return ref;
             }
             // Skip system classes to avoid bloating output (e.g. Scanner, System, etc.)
+            // BUT: special-case java.util.Map implementations — serialize their entries
             ReferenceType type = objRef.referenceType();
+            boolean isMap = false;
+            try {
+                if (type instanceof ClassType) {
+                    for (InterfaceType iface : ((ClassType) type).allInterfaces()) {
+                        if (iface.name().equals("java.util.Map")) { isMap = true; break; }
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            if (isMap) {
+                if (!currentStore.containsKey(id)) {
+                    currentStore.put(id, null); // placeholder to break cycles
+                    Map<String, Object> entries = new LinkedHashMap<>();
+                    try {
+                        // Read HashMap internals directly via field access (no method invocation needed)
+                        // HashMap stores entries in a 'table' array of Node objects
+                        // Each Node has: hash, key, value, next
+                        Field tableField = null;
+                        for (Field f : type.allFields()) {
+                            if (f.name().equals("table")) { tableField = f; break; }
+                        }
+                        if (tableField != null) {
+                            Value tableVal = objRef.getValue(tableField);
+                            if (tableVal instanceof ArrayReference) {
+                                ArrayReference table = (ArrayReference) tableVal;
+                                for (Value slot : table.getValues()) {
+                                    if (!(slot instanceof ObjectReference)) continue;
+                                    ObjectReference node = (ObjectReference) slot;
+                                    // Walk the chain (for collision chaining)
+                                    int chainLimit = 0;
+                                    while (node != null && chainLimit++ < 100) {
+                                        ReferenceType nodeType = node.referenceType();
+                                        Field keyField = null, valField = null, nextField = null;
+                                        for (Field f : nodeType.allFields()) {
+                                            if (f.name().equals("key")) keyField = f;
+                                            else if (f.name().equals("value")) valField = f;
+                                            else if (f.name().equals("next")) nextField = f;
+                                        }
+                                        if (keyField != null && valField != null) {
+                                            Value k = node.getValue(keyField);
+                                            Value v = node.getValue(valField);
+                                            // Serialize key as string
+                                            String keyStr;
+                                            if (k instanceof StringReference) {
+                                                keyStr = ((StringReference) k).value();
+                                            } else if (k instanceof ObjectReference) {
+                                                // For Character/Integer wrapper: get the 'value' field
+                                                ReferenceType kt = ((ObjectReference) k).referenceType();
+                                                Field innerVal = null;
+                                                for (Field f : kt.allFields()) {
+                                                    if (f.name().equals("value")) { innerVal = f; break; }
+                                                }
+                                                if (innerVal != null) {
+                                                    Value inner = ((ObjectReference) k).getValue(innerVal);
+                                                    keyStr = (inner instanceof CharValue)
+                                                        ? String.valueOf(((CharValue) inner).value())
+                                                        : inner.toString();
+                                                } else {
+                                                    keyStr = k.toString();
+                                                }
+                                            } else {
+                                                keyStr = (k != null) ? k.toString() : "null";
+                                            }
+                                            entries.put(keyStr, serialize(v, currentStore));
+                                        }
+                                        // Move to next node in chain
+                                        if (nextField != null) {
+                                            Value nextVal = node.getValue(nextField);
+                                            node = (nextVal instanceof ObjectReference) ? (ObjectReference) nextVal : null;
+                                        } else {
+                                            node = null;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        // Fallback: empty map shown
+                    }
+                    Map<String, Object> mapData = new LinkedHashMap<>();
+                    mapData.put("type", "hashmap");
+                    mapData.put("__viz_type", "hashmap");
+                    mapData.put("value", entries);
+                    mapData.put("__viz_id", id);
+                    currentStore.put(id, mapData);
+                }
+                Map<String, String> ref = new HashMap<>();
+                ref.put("__viz_ref", id);
+                return ref;
+            }
+
             if (type.name().startsWith("java.") || type.name().startsWith("sun.") || type.name().startsWith("jdk.")) {
-                 return type.name() + "@" + id; 
+                // Unwrap Java primitive wrapper types (Integer, Character, Boolean, etc.)
+                // so they display as plain values instead of "java.lang.Integer@id"
+                try {
+                    Field innerVal = null;
+                    for (Field f : type.allFields()) {
+                        if (f.name().equals("value")) { innerVal = f; break; }
+                    }
+                    if (innerVal != null) {
+                        Value wrapped = objRef.getValue(innerVal);
+                        if (wrapped instanceof PrimitiveValue) {
+                            return serialize(wrapped, currentStore);
+                        }
+                    }
+                } catch (Exception ignored) {}
+                return type.name() + "@" + id;
             }
 
             if (!currentStore.containsKey(id)) {
