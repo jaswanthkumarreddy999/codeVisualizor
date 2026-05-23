@@ -520,7 +520,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                 // Base positioning classes
                 const BaseClasses = "absolute top-0 left-0";
 
-                if (!isArray && !isTree && !isSLL) {
+                if (!isArray && !isTree && !isSLL && !isHashMap) {
                     // Simple Value
                     Content = (
                         <PrimitiveVisualizer
@@ -597,7 +597,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     );
                 }
 
-                const defaultSize = (isArray || isMatrix || isTree || isSLL) ? { width: 600, height: 500 } : { width: 150, height: 120 };
+                const defaultSize = (isArray || isMatrix || isTree || isSLL || isHashMap) ? { width: 600, height: 500 } : { width: 150, height: 120 };
                 const currentSize = sizes[varName] || defaultSize;
 
                 return (

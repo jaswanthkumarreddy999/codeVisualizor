@@ -36,13 +36,28 @@ export const WatchWindow: React.FC<WatchWindowProps> = ({ heap, stack }) => {
                                         ? Array.isArray(value[0])
                                             ? `Matrix(${value.length}×${value[0]?.length ?? 0})`
                                             : `Array(${value.length})`
-                                        : '{ ... }'
+                                        : value.__viz_type === 'hashmap'
+                                            ? `HashMap(${Object.keys(value).filter(k => k !== '__viz_type' && k !== '__viz_id').length})`
+                                            : '{ ... }'
                                     : String(value)}
                             </span>
                         </div>
-                        {typeof value === 'object' && value !== null && (
+                        {typeof value === 'object' && value !== null && value.__viz_type === 'hashmap' && (
                             <div className="pl-4 mt-1 border-l border-theme space-y-1">
-                                {Object.entries(value).map(([prop, val]) => (
+                                {Object.entries(value)
+                                    .filter(([k]) => k !== '__viz_type' && k !== '__viz_id')
+                                    .map(([k, v]) => (
+                                        <div key={k} className="flex gap-2 text-[12px]">
+                                            <span className="text-orange-400 font-bold">{k}</span>
+                                            <span className="text-theme-secondary">=</span>
+                                            <span className="text-theme-secondary">{String(v)}</span>
+                                        </div>
+                                    ))}
+                            </div>
+                        )}
+                        {typeof value === 'object' && value !== null && value.__viz_type !== 'hashmap' && !Array.isArray(value) && (
+                            <div className="pl-4 mt-1 border-l border-theme space-y-1">
+                                {Object.entries(value).filter(([k]) => k !== '__viz_id' && k !== '__viz_type').map(([prop, val]) => (
                                     <div key={prop} className="flex gap-2 text-[12px]">
                                         <span className="text-teal-600">{prop}</span>
                                         <span className="text-theme-secondary">=</span>
