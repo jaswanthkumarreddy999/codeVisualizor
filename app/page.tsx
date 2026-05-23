@@ -57,14 +57,6 @@ export default function Home() {
   };
 
   const currentSnapshot = exe.history[exe.currentStepIndex] || { heap: {}, stack: {}, line: 0, description: 'Initialization', stdout: '' };
-  // For Java/Python backend languages, stdout is captured BEFORE the line executes (JDI behavior).
-  // We want output to appear AFTER leaving the print line, not when entering it.
-  // So: show the PREVIOUS step's stdout while on the current step.
-  // This means output only becomes visible once you step past the line that produced it.
-  const prevSnapshot = exe.history[exe.currentStepIndex - 1];
-  const displayStdout = (language !== 'typescript' && prevSnapshot !== undefined)
-    ? prevSnapshot.stdout ?? ''
-    : currentSnapshot.stdout;
 
   return (
     <main className="flex flex-col h-screen overflow-hidden bg-theme-main text-theme-primary transition-colors duration-300">
@@ -129,7 +121,7 @@ export default function Home() {
             <IOPanel
               inputVal={exe.inputVal}
               onInputChange={exe.setInputVal}
-              outputVal={displayStdout ?? exe.outputVal}
+              outputVal={currentSnapshot.stdout ?? exe.outputVal}
               isIOCollapsed={layout.isIOCollapsed}
               onToggleIO={layout.toggleIO}
               inputWidth={layout.inputWidth}
@@ -155,7 +147,7 @@ export default function Home() {
               <ErrorBoundary>
                 <UnifiedVisualizer
                   heap={currentSnapshot.heap}
-                  stdout={displayStdout}
+                  stdout={currentSnapshot.stdout}
                   visualizedVariables={visualizedVariables}
                   onRemoveVariable={(name) => setVisualizedVariables(prev => prev.filter(v => v !== name))}
                   onAddVariable={(name) => setVisualizedVariables(prev => prev.includes(name) ? prev : [...prev, name])}
