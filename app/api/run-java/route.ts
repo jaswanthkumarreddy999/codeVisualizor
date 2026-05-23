@@ -13,6 +13,223 @@ const logDebug = async (msg: string) => {
     // console.log(msg); // Uncomment for verbose logging
 };
 
+/**
+ * Formats Java code so each statement/brace is on its own line.
+ * This ensures the JDI debugger reports correct line numbers even when
+ * the user pastes code as a single line.
+ * Also adds braces around braceless for/while/if bodies so the JDI
+ * stepper can see loop variables in scope on every step.
+ */
+function formatJavaCode(code: string): string {
+    // If the code already has multiple non-import lines, it's already formatted
+    const nonImportLines = code.split('\n').filter(l => l.trim().length > 0 && !l.trim().startsWith('import ') && !l.trim().startsWith('//'));
+    if (nonImportLines.length > 5) return code;
+
+    // ── Step 1: Tokenize ──────────────────────────────────────────────────────
+    // Tokens are: text chunks, '{', '}', ';'
+    // Special handling: when we see for/while/if followed by '(', we read the
+    // full balanced header and emit it as its own token, then continue tokenizing
+    // the body separately.
+    const tokens: string[] = [];
+    let i = 0;
+    let current = '';
+
+    const flushCurrent = () => {
+        const t = current.trim();
+        if (t) tokens.push(t);
+        current = '';
+    };
+
+    // Read a balanced parenthesised expression starting AFTER the opening '('
+    // Returns the full string including the closing ')'
+    const readBalancedParen = (src: string, start: number): { text: string; end: number } => {
+        let depth = 1, j = start, text = '';
+        while (j < src.length && depth > 0) {
+            const c = src[j];
+            if (c === '"') {
+                text += c; j++;
+                while (j < src.length && src[j] !== '"') {
+                    if (src[j] === '\\') { text += src[j]; j++; }
+                    text += src[j]; j++;
+                }
+                text += '"'; j++;
+                continue;
+            }
+            if (c === '(') depth++;
+            else if (c === ')') depth--;
+            text += c; j++;
+        }
+        return { text, end: j };
+    };
+
+    while (i < code.length) {
+        const ch = code[i];
+
+        // String literal
+        if (ch === '"') {
+            let str = '"'; i++;
+            while (i < code.length && code[i] !== '"') {
+                if (code[i] === '\\') { str += code[i]; i++; }
+                str += code[i]; i++;
+            }
+            str += '"'; i++;
+            current += str;
+            continue;
+        }
+
+        // Char literal
+        if (ch === "'") {
+            let str = "'"; i++;
+            while (i < code.length && code[i] !== "'") {
+                if (code[i] === '\\') { str += code[i]; i++; }
+                str += code[i]; i++;
+            }
+            str += "'"; i++;
+            current += str;
+            continue;
+        }
+
+        // Line comment
+        if (ch === '/' && code[i + 1] === '/') {
+            flushCurrent();
+            let comment = '';
+            while (i < code.length && code[i] !== '\n') { comment += code[i]; i++; }
+            tokens.push(comment);
+            continue;
+        }
+
+        // Block comment
+        if (ch === '/' && code[i + 1] === '*') {
+            flushCurrent();
+            let comment = '';
+            while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
+                comment += code[i]; i++;
+            }
+            comment += '*/'; i += 2;
+            tokens.push(comment);
+            continue;
+        }
+
+        // Detect control-flow keyword: for/while/if/else-if
+        // We need to check that 'current' ends with the keyword (or is empty + keyword at i)
+        const rest = code.slice(i);
+        const cfMatch = rest.match(/^((?:else\s+)?if|for|while)\s*\(/);
+        if (cfMatch) {
+            // Flush anything before the keyword that's already in current
+            // (current might have leading whitespace only at this point)
+            flushCurrent();
+            const keyword = cfMatch[1];
+            // Advance past keyword and opening paren
+            i += cfMatch[0].length;
+            const { text: innerParen, end: afterParen } = readBalancedParen(code, i);
+            i = afterParen;
+            // innerParen ends with ')' already included via readBalancedParen
+            // Actually readBalancedParen stops AFTER the closing ), so innerParen
+            // does NOT include the final ')'. Let's reconstruct:
+            // cfMatch[0] already includes the '(' so header = keyword + '(' + innerParen
+            // But innerParen consumed the ')' in depth tracking — the last char consumed
+            // was ')' which decremented depth to 0, so it IS included in text.
+            // Wait — let's re-check: depth starts at 1, when we see ')' depth becomes 0
+            // and we still do text += c before j++. So ')' IS in text.
+            const header = `${cfMatch[0]}${innerParen}`; // e.g. "for(" + "int x : arr)" = "for(int x : arr)"
+            tokens.push(header);
+
+            // Skip whitespace after header
+            while (i < code.length && (code[i] === ' ' || code[i] === '\t')) i++;
+
+            // If next char is '{', it's a normal block — push nothing extra, let { be handled
+            if (code[i] === '{') {
+                // normal — fall through
+            } else if (code[i] !== '\n' && i < code.length) {
+                // Braceless body — inject synthetic braces
+                tokens.push('{');
+                // Read body up to ';' (single statement)
+                let body = '';
+                while (i < code.length && code[i] !== ';' && code[i] !== '{' && code[i] !== '}') {
+                    if (code[i] === '"') {
+                        body += code[i]; i++;
+                        while (i < code.length && code[i] !== '"') {
+                            if (code[i] === '\\') { body += code[i]; i++; }
+                            body += code[i]; i++;
+                        }
+                        body += '"'; i++;
+                        continue;
+                    }
+                    body += code[i]; i++;
+                }
+                if (body.trim()) tokens.push(body.trim());
+                if (i < code.length && code[i] === ';') { tokens.push(';'); i++; }
+                tokens.push('}');
+            }
+            continue;
+        }
+
+        if (ch === '{' || ch === '}' || ch === ';') {
+            // Check if '{' is an array/object initializer (preceded by '=' or 'new ...[')
+            // In that case, read the whole { ... } as part of current token
+            if (ch === '{') {
+                const prev = current.trim();
+                const isInitializer = prev.endsWith('=') || prev.endsWith(']') || prev.endsWith(')') || /new\s+\w+(\[\])+\s*$/.test(prev) || /=\s*$/.test(prev);
+                if (isInitializer) {
+                    // Read the entire initializer block as one token
+                    let block = '{'; i++;
+                    let depth = 1;
+                    while (i < code.length && depth > 0) {
+                        const c = code[i];
+                        if (c === '{') depth++;
+                        else if (c === '}') depth--;
+                        if (depth > 0) block += c;
+                        i++;
+                    }
+                    block += '}';
+                    current += block;
+                    continue;
+                }
+            }
+            flushCurrent();
+            tokens.push(ch);
+        } else if (ch === '\n') {
+            flushCurrent();
+        } else {
+            current += ch;
+        }
+        i++;
+    }
+    flushCurrent();
+
+    // ── Step 2: Rebuild with indentation ─────────────────────────────────────
+    let result = '';
+    let indent = 0;
+    const TAB = '    ';
+
+    for (let t = 0; t < tokens.length; t++) {
+        const tok = tokens[t];
+        const nextTok = tokens[t + 1];
+
+        if (tok === '}') {
+            indent = Math.max(0, indent - 1);
+            result += TAB.repeat(indent) + '}\n';
+        } else if (tok === '{') {
+            result += ' {\n';
+            indent++;
+        } else if (tok === ';') {
+            result += ';\n';
+        } else if (tok.startsWith('//') || tok.startsWith('/*')) {
+            result += TAB.repeat(indent) + tok + '\n';
+        } else {
+            if (nextTok === '{') {
+                result += TAB.repeat(indent) + tok; // { appended next iteration
+            } else if (nextTok === ';') {
+                result += TAB.repeat(indent) + tok; // ; appended next iteration
+            } else {
+                result += TAB.repeat(indent) + tok + '\n';
+            }
+        }
+    }
+
+    return result;
+}
+
 export async function POST(req: Request) {
     let filePath: string | undefined;
     let classPath: string | undefined;
@@ -25,32 +242,32 @@ export async function POST(req: Request) {
 
         await mkdir(tmpDir, { recursive: true });
 
+        // Format the code FIRST — before any instrumentation.
+        // This ensures braceless for-each/if/while bodies get braces,
+        // and all statements are on separate lines for correct JDI line numbers.
+        const formattedCode = formatJavaCode(code);
+
         // Robust Java Code Wrapper
-        let processedCode = code;
+        let processedCode = formattedCode;
 
         // Check if the user already provided a class named Main
         // Relaxed regex to catch 'class Main', 'public class Main', 'final class Main', etc.
-        const hasMainClass = /(?:public\s+)?(?:final\s+|abstract\s+)?class\s+Main\b/.test(code);
+        const hasMainClass = /(?:public\s+)?(?:final\s+|abstract\s+)?class\s+Main\b/.test(formattedCode);
 
         if (hasMainClass) {
-            // User provided full class structure. Trust it.
+            // User provided full class structure.
             // We need to inject the traceCondition method into the existing class Main
-            // And also instrument the code.
-            // This is getting complicated to inject into user string.
-            // For now, let's just REPLACE usage if we can, or insert the method.
-            // Simpler: Just append the static method at the end of class body?
-            // "class Main {" -> "class Main { public static boolean traceCondition(boolean b) { return b; }"
-            // And run wrapConditions on the whole code.
-
+            // and instrument the code.
+            
             const wrapConditions = (text: string) => {
                 let result = '';
                 let i = 0;
                 while (i < text.length) {
-                    const ifMatch = text.substr(i).match(/^(if|while)\s*\(/);
+                    const ifMatch = text.substr(i).match(/^(if|while|for)\s*\(/);
                     if (ifMatch) {
+                        const keyword = ifMatch[1];
                         result += ifMatch[0];
                         i += ifMatch[0].length;
-
                         let balance = 1;
                         let start = i;
                         while (i < text.length && balance > 0) {
@@ -58,10 +275,30 @@ export async function POST(req: Request) {
                             else if (text[i] === ')') balance--;
                             i++;
                         }
-
                         if (balance === 0) {
-                            const condition = text.substring(start, i - 1);
-                            result += `Main.traceCondition(${condition})`;
+                            const inner = text.substring(start, i - 1);
+                            if (keyword === 'for') {
+                                // for loops have 3 semicolon-separated clauses: init; condition; update
+                                // Only wrap the condition (middle clause), not init or update
+                                const parts = inner.split(';');
+                                if (parts.length === 3) {
+                                    const condition = parts[1].trim();
+                                    const wrapped = condition && !condition.startsWith('Main.traceCondition')
+                                        ? `Main.traceCondition(${condition})`
+                                        : condition;
+                                    result += `${parts[0]};${wrapped};${parts[2]}`;
+                                } else {
+                                    // Enhanced for-each or unusual form — don't wrap
+                                    result += inner;
+                                }
+                            } else {
+                                // if / while — wrap the whole condition
+                                if (!inner.trim().startsWith('Main.traceCondition')) {
+                                    result += `Main.traceCondition(${inner})`;
+                                } else {
+                                    result += inner;
+                                }
+                            }
                             result += ')';
                         } else {
                             result += text.substring(start);
@@ -74,13 +311,21 @@ export async function POST(req: Request) {
                 return result;
             };
 
-            processedCode = wrapConditions(code);
-            // Insert helper method before last brace
-            const lastBrace = processedCode.lastIndexOf('}');
-            if (lastBrace !== -1) {
-                processedCode = processedCode.substring(0, lastBrace) +
-                    ` public static boolean traceCondition(boolean b) { return b; } ` +
-                    processedCode.substring(lastBrace);
+            processedCode = wrapConditions(formattedCode);
+            
+            // Insert helper method before the last brace of the Main class
+            // This is a heuristic.
+            const mainClassRegex = /class\s+Main\b[^{]*{/g;
+            let match;
+            let lastMatchIndex = -1;
+            while ((match = mainClassRegex.exec(processedCode)) !== null) {
+                lastMatchIndex = match.index + match[0].length;
+            }
+
+            if (lastMatchIndex !== -1) {
+                processedCode = processedCode.substring(0, lastMatchIndex) +
+                    ` public static boolean traceCondition(boolean __viz_b) { return __viz_b; } ` +
+                    processedCode.substring(lastMatchIndex);
             }
 
         } else {
@@ -186,20 +431,15 @@ export async function POST(req: Request) {
             // Let's use a helper to wrap conditions in the text.
 
             const wrapConditions = (text: string) => {
-                // Simple regex for "if (foo)" -> "if (Main.traceCondition(foo))"
-                // This is tricky without a real parser because of nested parens "if ((a > b))"
-                // But let's try a best-effort approach given the time constraints.
-                // Match "if (" then read until matching paren.
-
                 let result = '';
                 let i = 0;
                 while (i < text.length) {
-                    const ifMatch = text.substr(i).match(/^(if|while)\s*\(/);
+                    const ifMatch = text.substr(i).match(/^(if|while|for)\s*\(/);
                     if (ifMatch) {
-                        result += ifMatch[0]; // "if ("
+                        const keyword = ifMatch[1];
+                        result += ifMatch[0];
                         i += ifMatch[0].length;
 
-                        // Find closing paren for the condition
                         let balance = 1;
                         let start = i;
                         while (i < text.length && balance > 0) {
@@ -209,13 +449,29 @@ export async function POST(req: Request) {
                         }
 
                         if (balance === 0) {
-                            // Extract condition
-                            const condition = text.substring(start, i - 1);
-                            // Wrap it
-                            result += `Main.traceCondition(${condition})`;
-                            result += ')'; // Closing paren of if
+                            const inner = text.substring(start, i - 1);
+                            if (keyword === 'for') {
+                                // for loops: init; condition; update — only wrap the condition (middle)
+                                const parts = inner.split(';');
+                                if (parts.length === 3) {
+                                    const condition = parts[1].trim();
+                                    const wrapped = condition && !condition.startsWith('Main.traceCondition')
+                                        ? `Main.traceCondition(${condition})`
+                                        : condition;
+                                    result += `${parts[0]};${wrapped};${parts[2]}`;
+                                } else {
+                                    result += inner;
+                                }
+                            } else {
+                                // if / while — wrap the whole condition
+                                if (!inner.trim().startsWith('Main.traceCondition')) {
+                                    result += `Main.traceCondition(${inner})`;
+                                } else {
+                                    result += inner;
+                                }
+                            }
+                            result += ')';
                         } else {
-                            // Failed to find close, just append rest
                             result += text.substring(start);
                         }
                     } else {
@@ -293,7 +549,7 @@ ${processedScript}
 
                 const child = exec(
                     `java --add-modules jdk.jdi -cp "${tracerClassPath}${sep}${classPath}" Tracer "${classPath}" Main`,
-                    { timeout: 10000, env, maxBuffer: 50 * 1024 * 1024 },
+                    { timeout: 30000, env, maxBuffer: 50 * 1024 * 1024 },
                     (error, stdout, stderr) => {
                         if (error && !stdout) {
                             // If there is stdout, it might be a valid execution with a non-zero exit code (e.g. Runtime Exception)
@@ -325,6 +581,9 @@ ${processedScript}
 
             // logDebug(`[${id}] Tracer Output: ${output}`);
 
+            // Debug: log raw output length
+            console.log(`[${id}] Tracer raw stdout length: ${output.length}, jsonStart: ${output.indexOf('{')}, jsonEnd: ${output.lastIndexOf('}')}`);
+            
             // Parse valid JSON from output (it might contain other noise if JVM prints stuff)
             const jsonStart = output.indexOf('{');
             const jsonEnd = output.lastIndexOf('}');

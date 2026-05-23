@@ -5,7 +5,7 @@ export interface StateSnapshot {
     stack: Record<string, any>;
     line: number;
     description: string;
-    conditionResult?: boolean;
+    conditionResult?: boolean | null;
     stdout?: string;
 }
 
@@ -110,13 +110,10 @@ export class ExecutionEngine {
         const inputLines = inputVal ? inputVal.split('\n') : [];
         let inputIndex = 0;
         const mockPrompt = (msg?: string) => {
-            // For now, ignore msg (prompt text) or maybe push to output?
-            // "Standard" behavior: prompt() shows dialog, input() prints prompt to stdout without newline.
-            // Let's just return next line.
             if (inputIndex < inputLines.length) {
                 return inputLines[inputIndex++];
             }
-            return '';
+            throw new Error(`Input expected but none provided in the IO panel. Please enter input and click 'Run' again.`);
         };
 
         const capturedOutput: string[] = [];

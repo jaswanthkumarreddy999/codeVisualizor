@@ -118,7 +118,8 @@ def trace_execution(code, filename="<string>"):
         history.append({
             "line": frame.f_lineno,
             "roots": roots,
-            "store": store # The flat heap for this step
+            "store": store, # The flat heap for this step
+            "stdout": captured_out.getvalue() if captured_out else ""
         })
         
         return tracer
@@ -132,8 +133,19 @@ def trace_execution(code, filename="<string>"):
         
         # Capture stdout
         sys.stdout = captured_out
+
+        # Mock input() to handle missing input gracefully
+        def mock_input(prompt_msg=""):
+            sys.stdout.write(prompt_msg)
+            sys.stdout.flush()
+            line = sys.stdin.readline()
+            if not line:
+                raise EOFError("Input expected but none provided in the IO panel. Please enter input and click 'Run' again.")
+            return line.rstrip('\n')
         
-        exec(compiled, {})
+        # Inject mock input into globals
+        global_scope = {"input": mock_input}
+        exec(compiled, global_scope)
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
 

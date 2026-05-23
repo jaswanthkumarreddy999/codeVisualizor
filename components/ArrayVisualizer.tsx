@@ -35,11 +35,30 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
     const arrayName = variableName;
     const data = heap[arrayName] || [];
 
-    // 2. Explicit Pointers Logic
-    // Only use pointers explicitly present in activePointers list
+    // 2. Pointer classification
+    // Each active pointer is either:
+    //   'foreach' — has __viz_foreach_of === arrayName (parsed from source, definitive)
+    //   'index'   — numeric value that is a valid array index
+    //   'value'   — numeric value that matches an element (fallback)
     const pointers = activePointers
-        .map(name => ({ name, value: heap[name] }))
-        .filter(p => typeof p.value === 'number');
+        .map(name => {
+            const raw = heap[name];
+            if (raw === undefined || raw === null) return null;
+
+            // Definitive: for-each iterator tagged by hydrateHistory
+            if (raw && typeof raw === 'object' && raw.__viz_foreach_of === arrayName) {
+                return { name, value: raw.value, kind: 'foreach' as const };
+            }
+
+            const val = typeof raw === 'number' ? raw : null;
+            if (val === null) return null;
+
+            const isValidIndex = Number.isInteger(val) && val >= 0 && val < data.length;
+            const indexNamePattern = /^(i|j|k|l|r|idx|index|left|right|mid|lo|hi|start|end|ptr|pos|cur|prev|next|head|tail|top|bot|p|q)$/i;
+            const kind: 'index' | 'value' = (isValidIndex && indexNamePattern.test(name)) ? 'index' : 'value';
+            return { name, value: val, kind };
+        })
+        .filter((p): p is { name: string; value: number; kind: 'index' | 'value' | 'foreach' } => p !== null);
 
     const maxVal = Math.max(...(data.length > 0 ? data.map(Number) : [1]), 1);
 
@@ -142,7 +161,13 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                     <AnimatePresence mode="popLayout">
                         {data.map((rawVal: any, idx: number) => {
                             const val = resolveValue(rawVal);
-                            const isActive = pointers.some(p => p.value === idx) || (rect && idx >= rect.start && idx <= rect.end);
+                            // Index pointers highlight by position
+                            const isActiveByIndex = pointers.some(p => p.kind === 'index' && p.value === idx);
+                            // For-each and value pointers highlight by matching element value
+                            const isActiveByValue = pointers.some(p =>
+                                (p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value
+                            );
+                            const isActive = isActiveByIndex || isActiveByValue || (rect && idx >= rect.start && idx <= rect.end);
 
                             // Calculate heights
                             const heightPct = Math.max((val / maxVal) * 100, 2);
@@ -173,10 +198,16 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                         <motion.div
                                             initial={{ height: 0 }}
                                             animate={{ height: `${(heightPct / (heightPct + waterHeightPct)) * 100}%` }}
-                                            className={`w-full relative overflow-hidden transition-all duration-300 ${isActive
-                                                ? 'bg-gradient-to-t from-indigo-600 to-violet-500 shadow-[0_0_30px_rgba(139,92,246,0.3)]'
-                                                : 'bg-gradient-to-t from-slate-800 to-slate-700'
+                                            className={`w-full relative overflow-hidden transition-all duration-300 ${isActiveByValue
+                                                ? 'bg-gradient-to-t from-teal-600 to-teal-400 shadow-[0_0_30px_rgba(20,184,166,0.3)]'
+                                                : isActive
+                                                    ? 'bg-gradient-to-t from-indigo-600 to-violet-500 shadow-[0_0_30px_rgba(139,92,246,0.3)]'
+                                                    : 'bg-gradient-to-t from-slate-800 to-slate-700'
                                                 }`}
+                                            style={{
+                                                borderRadius: waterHeightPct > 0 ? '0 0 4px 4px' : '4px 4px 0 0',
+                                                opacity: isActive ? 1 : 0.8
+                                            }}
                                             style={{
                                                 borderRadius: waterHeightPct > 0 ? '0 0 4px 4px' : '4px 4px 0 0',
                                                 opacity: isActive ? 1 : 0.8
@@ -217,7 +248,8 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                     {/* Pointer Labels */}
                                     <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 w-max z-10">
                                         <div className="flex flex-col gap-1 items-center">
-                                            {pointers.filter(p => p.value === idx).map(p => (
+                                            {/* Index pointers — shown below bar as arrows */}
+                                            {pointers.filter(p => p.kind === 'index' && p.value === idx).map(p => (
                                                 <motion.div
                                                     key={p.name}
                                                     initial={{ opacity: 0, y: 10, scale: 0.8 }}
@@ -230,6 +262,24 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                                 >
                                                     {p.name}
                                                     <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[4px]" style={{ borderBottomColor: 'var(--accent)' }} />
+                                                </motion.div>
+                                            ))}
+                                            {/* For-each / value pointers — teal, show varName = value */}
+                                            {pointers.filter(p =>
+                                                (p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value
+                                            ).map(p => (
+                                                <motion.div
+                                                    key={p.name}
+                                                    initial={{ opacity: 0, y: 10, scale: 0.8 }}
+                                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                    className="px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap bg-teal-500 cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1"
+                                                    style={{ boxShadow: '0 4px 6px -1px rgba(20,184,166,0.4)' }}
+                                                    onClick={(e) => { e.stopPropagation(); }}
+                                                    onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
+                                                    title={`${p.name} = ${p.value} — double click to remove`}
+                                                >
+                                                    {p.name} = {p.value}
+                                                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[4px] border-b-teal-500" />
                                                 </motion.div>
                                             ))}
                                         </div>
@@ -245,7 +295,11 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                     <AnimatePresence mode="popLayout" initial={false}>
                         {data.map((rawVal: any, idx: number) => {
                             const val = resolveValue(rawVal);
-                            const isActive = pointers.some(p => p.value === idx);
+                            const isActiveByIndex = pointers.some(p => p.kind === 'index' && p.value === idx);
+                            const isActiveByValue = pointers.some(p =>
+                                (p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value
+                            );
+                            const isActive = isActiveByIndex || isActiveByValue;
 
                             return (
                                 <motion.div
@@ -256,20 +310,27 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                     className="relative group w-48"
                                 >
                                     {/* Pointer Labels (Side) */}
-                                    {pointers.filter(p => p.value === idx).length > 0 && (
+                                    {pointers.filter(p =>
+                                        (p.kind === 'index' && p.value === idx) ||
+                                        ((p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value)
+                                    ).length > 0 && (
                                         <div className="absolute right-full mr-4 top-1/2 -translate-y-1/2 flex flex-col items-end gap-1 w-max z-10">
-                                            {pointers.filter(p => p.value === idx).map(p => (
+                                            {pointers.filter(p =>
+                                                (p.kind === 'index' && p.value === idx) ||
+                                                ((p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value)
+                                            ).map(p => (
                                                 <motion.div
                                                     key={p.name}
                                                     initial={{ opacity: 0, x: 10 }}
                                                     animate={{ opacity: 1, x: 0 }}
-                                                    className="px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap bg-accent cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1"
+                                                    className={`px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1 ${(p.kind === 'foreach' || p.kind === 'value') ? 'bg-teal-500' : 'bg-accent'}`}
                                                     onClick={(e) => { e.stopPropagation(); }}
                                                     onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
                                                     title="Double click to remove pointer"
                                                 >
-                                                    {p.name}
-                                                    <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-0 h-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[4px]" style={{ borderLeftColor: 'var(--accent)' }} />
+                                                    {(p.kind === 'foreach' || p.kind === 'value') ? `${p.name} = ${p.value}` : p.name}
+                                                    <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-0 h-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[4px]"
+                                                        style={{ borderLeftColor: (p.kind === 'foreach' || p.kind === 'value') ? 'rgb(20,184,166)' : 'var(--accent)' }} />
                                                 </motion.div>
                                             ))}
                                         </div>
@@ -298,7 +359,11 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                     <AnimatePresence mode="popLayout">
                         {data.map((rawVal: any, idx: number) => {
                             const val = resolveValue(rawVal);
-                            const isActive = pointers.some(p => p.value === idx);
+                            const isActiveByIndex = pointers.some(p => p.kind === 'index' && p.value === idx);
+                            const isActiveByValue = pointers.some(p =>
+                                (p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value
+                            );
+                            const isActive = isActiveByIndex || isActiveByValue;
 
                             return (
                                 <motion.div
@@ -309,20 +374,27 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                     className="flex flex-col items-center relative group min-w-[50px]"
                                 >
                                     {/* Pointer Labels (Top) */}
-                                    {pointers.filter(p => p.value === idx).length > 0 && (
+                                    {pointers.filter(p =>
+                                        (p.kind === 'index' && p.value === idx) ||
+                                        ((p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value)
+                                    ).length > 0 && (
                                         <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 w-max z-10">
-                                            {pointers.filter(p => p.value === idx).map(p => (
+                                            {pointers.filter(p =>
+                                                (p.kind === 'index' && p.value === idx) ||
+                                                ((p.kind === 'foreach' || p.kind === 'value') && resolveValue(rawVal) === p.value)
+                                            ).map(p => (
                                                 <motion.div
                                                     key={p.name}
                                                     initial={{ opacity: 0, y: 10 }}
                                                     animate={{ opacity: 1, y: 0 }}
-                                                    className="px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap bg-accent cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1"
+                                                    className={`px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1 ${(p.kind === 'foreach' || p.kind === 'value') ? 'bg-teal-500' : 'bg-accent'}`}
                                                     onClick={(e) => { e.stopPropagation(); }}
                                                     onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
-                                                    title="Double click to remove pointer"
+                                                    title={(p.kind === 'foreach' || p.kind === 'value') ? `${p.name} = ${p.value} (current value)` : 'Double click to remove'}
                                                 >
-                                                    {p.name}
-                                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px]" style={{ borderTopColor: 'var(--accent)' }} />
+                                                    {(p.kind === 'foreach' || p.kind === 'value') ? `${p.name} = ${p.value}` : p.name}
+                                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px]"
+                                                        style={{ borderTopColor: (p.kind === 'foreach' || p.kind === 'value') ? 'rgb(20,184,166)' : 'var(--accent)' }} />
                                                 </motion.div>
                                             ))}
                                         </div>
@@ -331,7 +403,9 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                     {/* Box */}
                                     <div
                                         className={`w-12 h-12 flex items-center justify-center rounded-lg border-2 font-bold text-sm transition-all duration-300 relative ${isActive
-                                            ? 'border-accent bg-accent/10 text-accent shadow-[0_0_20px_var(--accent-light)] scale-110'
+                                            ? isActiveByValue
+                                                ? 'border-teal-500 bg-teal-500/10 text-teal-400 shadow-[0_0_20px_rgba(20,184,166,0.3)] scale-110'
+                                                : 'border-accent bg-accent/10 text-accent shadow-[0_0_20px_var(--accent-light)] scale-110'
                                             : 'border-theme-primary/20 bg-theme-tertiary/30 text-theme-primary group-hover:border-theme-primary/50'
                                             }`}
                                     >

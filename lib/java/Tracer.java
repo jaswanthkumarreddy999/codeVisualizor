@@ -110,6 +110,7 @@ public class Tracer {
         if (process.isAlive()) {
             process.destroyForcibly();
         }
+        System.exit(0);
     }
 
     private static void startStreamReaders(Process process) {
@@ -146,6 +147,11 @@ public class Tracer {
     private static void runEventLoop(VirtualMachine vm) throws Exception {
         EventQueue eventQueue = vm.eventQueue();
         boolean connected = true;
+        int stepCount = 0;
+        final int MAX_STEPS = 2000;
+
+        // Set of method names to skip recording (internal helpers)
+        final Set<String> SKIP_METHODS = new HashSet<>(Arrays.asList("traceCondition"));
 
         while (connected) {
             try {
@@ -167,8 +173,13 @@ public class Tracer {
                         StackFrame frame = thread.frame(0);
                         EventRequestManager erm = vm.eventRequestManager();
                         erm.deleteEventRequest(evt.request());
-                        StepRequest stepReq = erm.createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_OVER);
-                        stepReq.addClassFilter(TARGET_CLASS);
+                        // Use STEP_INTO so we step line-by-line through user code
+                        StepRequest stepReq = erm.createStepRequest(thread, StepRequest.STEP_LINE, StepRequest.STEP_INTO);
+                        stepReq.addClassExclusionFilter("java.*");
+                        stepReq.addClassExclusionFilter("javax.*");
+                        stepReq.addClassExclusionFilter("sun.*");
+                        stepReq.addClassExclusionFilter("com.sun.*");
+                        stepReq.addClassExclusionFilter("jdk.*");
                         stepReq.enable();
                         recordState(frame, thread, "Breakpoint hit");
                     } 
@@ -176,7 +187,20 @@ public class Tracer {
                         StepEvent evt = (StepEvent) event;
                         ThreadReference thread = evt.thread();
                         StackFrame frame = thread.frame(0);
-                        recordState(frame, thread, "Stepping");
+                        String methodName = frame.location().method().name();
+
+                        if (!SKIP_METHODS.contains(methodName)) {
+                            // Only record steps in user code (not internal helpers)
+                            recordState(frame, thread, "Stepping");
+                            stepCount++;
+                            if (stepCount >= MAX_STEPS) {
+                                vm.eventRequestManager().deleteEventRequests(vm.eventRequestManager().stepRequests());
+                                vm.dispose();
+                                connected = false;
+                            }
+                        }
+                        // If we're inside a skipped method (e.g. traceCondition), just resume —
+                        // the stepper will naturally return to user code on the next step event.
                     }
                     else if (event instanceof MethodEntryEvent) {
                         MethodEntryEvent evt = (MethodEntryEvent) event;
@@ -205,37 +229,47 @@ public class Tracer {
         }
     }
 
+    // Variables that are internal/noise and should not appear in the heap.
+    // Only filter "args" (the main method's String[] args parameter) — never filter
+    // single-letter names like "b" which are valid user variable names.
+    private static final Set<String> HIDDEN_VARS = new HashSet<>(Arrays.asList("args", "__viz_b"));
+
     private static void recordState(StackFrame frame, ThreadReference thread, String reason) {
         try {
-            // Give a small moment for stdout/stderr to be flushed from the target process pipe
-            // This prevents race conditions where we snapshot before catching the output of the just-executed line
-            try { Thread.sleep(100); } catch (InterruptedException e) {}
-
             Map<String, Object> snapshot = new HashMap<>();
             Map<String, Object> currentStore = new HashMap<>();
-            
-            // Stack
+
+            // Stack — filter out traceCondition and other internal helpers
             List<Map<String, Object>> stackTrace = new ArrayList<>();
             for (StackFrame f : thread.frames()) {
-                if (f.location().declaringType().name().equals(TARGET_CLASS) || f.location().declaringType().name().equals("Main")) {
-                     Map<String, Object> frameInfo = new HashMap<>();
-                     frameInfo.put("name", f.location().method().name());
-                     frameInfo.put("line", f.location().lineNumber());
-                     stackTrace.add(frameInfo);
+                String declType = f.location().declaringType().name();
+                String methodName = f.location().method().name();
+                if (!declType.startsWith("java.") && !declType.startsWith("javax.")
+                        && !declType.startsWith("sun.") && !declType.startsWith("com.sun.")
+                        && !declType.startsWith("jdk.")
+                        && !methodName.equals("traceCondition")) {
+                    Map<String, Object> frameInfo = new HashMap<>();
+                    frameInfo.put("name", methodName);
+                    frameInfo.put("line", f.location().lineNumber());
+                    stackTrace.add(frameInfo);
                 }
             }
             snapshot.put("stack", stackTrace);
             snapshot.put("line", frame.location().lineNumber());
 
-            // Roots
+            // Roots — collect visible variables, filtering out internal noise
             Map<String, Object> roots = new HashMap<>();
             try {
                 Map<LocalVariable, Value> visibleVariables = frame.getValues(frame.visibleVariables());
                 for (Map.Entry<LocalVariable, Value> entry : visibleVariables.entrySet()) {
-                    roots.put(entry.getKey().name(), serialize(entry.getValue(), currentStore));
+                    String varName = entry.getKey().name();
+                    if (!HIDDEN_VARS.contains(varName)) {
+                        roots.put(varName, serialize(entry.getValue(), currentStore));
+                    }
                 }
                 ReferenceType type = frame.location().declaringType();
                 for (Field field : type.visibleFields()) {
+                    if (HIDDEN_VARS.contains(field.name())) continue;
                     if (field.isStatic()) {
                         roots.put(field.name(), serialize(type.getValue(field), currentStore));
                     } else {

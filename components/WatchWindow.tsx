@@ -32,7 +32,11 @@ export const WatchWindow: React.FC<WatchWindowProps> = ({ heap, stack }) => {
                             <span className="text-theme-secondary">:</span>
                             <span className="text-accent truncate max-w-[150px]">
                                 {typeof value === 'object' && value !== null ?
-                                    (Array.isArray(value) ? `Array(${value.length})` : '{ ... }')
+                                    Array.isArray(value)
+                                        ? Array.isArray(value[0])
+                                            ? `Matrix(${value.length}×${value[0]?.length ?? 0})`
+                                            : `Array(${value.length})`
+                                        : '{ ... }'
                                     : String(value)}
                             </span>
                         </div>

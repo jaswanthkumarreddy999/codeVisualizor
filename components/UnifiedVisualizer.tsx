@@ -9,6 +9,7 @@ import { ArrayVisualizer } from './ArrayVisualizer';
 import { PrimitiveVisualizer } from './PrimitiveVisualizer';
 import { ArithmeticAnimator } from './ArithmeticAnimator';
 import { LinkedListVisualizer } from './LinkedListVisualizer';
+import { MatrixVisualizer } from './MatrixVisualizer';
 
 
 
@@ -54,8 +55,6 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
     React.useEffect(() => {
         const currentOut = stdout || "";
         const prevOut = prevStdoutRef.current;
-
-        console.log("Stdout check:", { currentOut, prevOut });
 
         if (currentOut.length > prevOut.length && currentOut.startsWith(prevOut)) {
             const diff = currentOut.substring(prevOut.length).trim();
@@ -304,12 +303,17 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     if (prevSizes[varName]) return prevSizes;
                     const value = heap[varName];
                     const isArray = Array.isArray(value);
+                    const isMatrix = isArray && value.length > 0 && (
+                        Array.isArray(value[0]) ||
+                        (value[0] && typeof value[0] === 'object' && (value[0].__viz_type === 'array' || Array.isArray(value[0].data)))
+                    );
                     const isTree = value && typeof value === 'object' && (value.__viz_type === 'treenode' || 'left' in value || 'right' in value);
                     const isSLL = value && typeof value === 'object' && (value.__viz_type === 'node' || 'next' in value);
+                    const isHashMap = value && typeof value === 'object' && (value.__viz_type === 'hashmap');
 
                     return {
                         ...prevSizes,
-                        [varName]: (isArray || isTree || isSLL)
+                        [varName]: (isArray || isMatrix || isTree || isSLL || isHashMap)
                             ? { width: 600, height: 500 }
                             : { width: 150, height: 120 }
                     };
@@ -484,19 +488,23 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                 if (value === undefined) return null;
 
                 const isArray = Array.isArray(value);
+                // 2D array: outer array whose first element is also an array (or hydrated array object)
+                const isMatrix = isArray && value.length > 0 && (
+                    Array.isArray(value[0]) ||
+                    (value[0] && typeof value[0] === 'object' && (value[0].__viz_type === 'array' || Array.isArray(value[0].data)))
+                );
                 const isTree = value && typeof value === 'object' && (value.__viz_type === 'treenode' || 'left' in value || 'right' in value);
-                // Enhanced check: accept if __viz_type is node, OR if it has 'val' and ('next' is present or null)
-                // Note: 'next' in value is true even if value.next is null.
                 const isSLL = (value && typeof value === 'object' && (
                     value.__viz_type === 'node' ||
                     ('val' in value && 'next' in value) ||
                     ('value' in value && 'next' in value)
                 )) || (varName === 'head' || varName === 'prev' || varName === 'curr' || varName === 'node');
 
-                // DEBUG LOGGING
-                if (varName === 'head' || varName === 'prev') {
-                    console.log(`[UnifiedVisualizer] ${varName}:`, value, { isArray, isTree, isSLL, hasNext: value && 'next' in value });
-                }
+                const isHashMap = value && typeof value === 'object' && (
+                    value.__viz_type === 'hashmap' || 
+                    (value.constructor && value.constructor.name === 'Map') ||
+                    (value.entries && typeof value.entries === 'function')
+                );
 
                 const commonProps = {
                     heap,
@@ -533,7 +541,24 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         : 'border-transparent hover:border-theme-tertiary hover:bg-theme-secondary/5 z-0'
                         }`;
 
-                    if (isArray) {
+                    if (isMatrix) {
+                        Content = (
+                            <MatrixVisualizer
+                                heap={heap}
+                                variableName={varName}
+                                activePointers={explicitPointers[varName] || []}
+                                onAddPointer={(pointerName) => setExplicitPointers(prev => {
+                                    const current = prev[varName] || [];
+                                    if (current.includes(pointerName)) return prev;
+                                    return { ...prev, [varName]: [...current, pointerName] };
+                                })}
+                                onRemovePointer={(pointerName) => setExplicitPointers(prev => {
+                                    const current = prev[varName] || [];
+                                    return { ...prev, [varName]: current.filter(p => p !== pointerName) };
+                                })}
+                            />
+                        );
+                    } else if (isArray) {
                         Content = (
                             <ArrayVisualizer
                                 {...commonProps}
@@ -555,6 +580,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         Content = <TreeVisualizer {...commonProps} />;
                     } else if (isSLL) {
                         Content = <LinkedListVisualizer {...commonProps} />;
+                    } else if (isHashMap) {
+                        Content = <HashMapVisualizer {...commonProps} />;
                     } else {
                         Content = <Visualizer {...commonProps} />;
                     }
@@ -572,7 +599,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     );
                 }
 
-                const defaultSize = (isArray || isTree || isSLL) ? { width: 600, height: 500 } : { width: 150, height: 120 };
+                const defaultSize = (isArray || isMatrix || isTree || isSLL) ? { width: 600, height: 500 } : { width: 150, height: 120 };
                 const currentSize = sizes[varName] || defaultSize;
 
                 return (

@@ -122,7 +122,6 @@ export function instrument(code: string): string {
                 if ((path.node as any)._processed) return;
 
                 const test = path.node.test;
-                // Avoid double wrapping
                 if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
 
                 const traceCall = t.callExpression(t.identifier('_trace'), [
@@ -140,7 +139,6 @@ export function instrument(code: string): string {
                 if ((path.node as any)._processed) return;
 
                 const test = path.node.test;
-                // Avoid double wrapping
                 if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
 
                 const traceCall = t.callExpression(t.identifier('_trace'), [
@@ -158,7 +156,6 @@ export function instrument(code: string): string {
                 if ((path.node as any)._processed) return;
 
                 const test = path.node.test;
-                // Avoid double wrapping
                 if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
 
                 const traceCall = t.callExpression(t.identifier('_trace'), [
@@ -169,6 +166,82 @@ export function instrument(code: string): string {
                 ]);
 
                 path.node.test = traceCall;
+                (path.node as any)._processed = true;
+            },
+
+            ForStatement(path) {
+                if ((path.node as any)._processed) return;
+
+                const test = path.node.test;
+                if (test) {
+                    if (t.isCallExpression(test) && t.isIdentifier(test.callee) && test.callee.name === '_trace') return;
+
+                    const traceCall = t.callExpression(t.identifier('_trace'), [
+                        t.stringLiteral('for condition'),
+                        test,
+                        t.numericLiteral(path.node.loc?.start.line || 0),
+                        t.stringLiteral('condition'),
+                    ]);
+
+                    path.node.test = traceCall;
+                }
+                (path.node as any)._processed = true;
+            },
+
+            ForInStatement(path) {
+                if ((path.node as any)._processed) return;
+
+                const left = path.node.left;
+                let name = 'item';
+                
+                if (t.isVariableDeclaration(left) && t.isVariableDeclarator(left.declarations[0])) {
+                    const id = left.declarations[0].id;
+                    if (t.isIdentifier(id)) name = id.name;
+                }
+
+                // Inject a trace inside the body to show the current key
+                const body = path.get('body');
+                const traceCall = t.expressionStatement(t.callExpression(t.identifier('_trace'), [
+                    t.stringLiteral(name),
+                    t.identifier(name),
+                    t.numericLiteral(path.node.loc?.start.line || 0),
+                    t.stringLiteral('assignment'),
+                ]));
+
+                if (body.isBlockStatement()) {
+                    body.node.body.unshift(traceCall);
+                } else {
+                    body.replaceWith(t.blockStatement([traceCall, body.node as t.Statement]));
+                }
+
+                (path.node as any)._processed = true;
+            },
+
+            ForOfStatement(path) {
+                if ((path.node as any)._processed) return;
+
+                const left = path.node.left;
+                let name = 'item';
+
+                if (t.isVariableDeclaration(left) && t.isVariableDeclarator(left.declarations[0])) {
+                    const id = left.declarations[0].id;
+                    if (t.isIdentifier(id)) name = id.name;
+                }
+
+                const body = path.get('body');
+                const traceCall = t.expressionStatement(t.callExpression(t.identifier('_trace'), [
+                    t.stringLiteral(name),
+                    t.identifier(name),
+                    t.numericLiteral(path.node.loc?.start.line || 0),
+                    t.stringLiteral('assignment'),
+                ]));
+
+                if (body.isBlockStatement()) {
+                    body.node.body.unshift(traceCall);
+                } else {
+                    body.replaceWith(t.blockStatement([traceCall, body.node as t.Statement]));
+                }
+
                 (path.node as any)._processed = true;
             },
         });

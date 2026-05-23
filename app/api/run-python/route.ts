@@ -34,9 +34,11 @@ export async function POST(req: Request) {
                     }
                 });
 
-                if (input && child.stdin) {
+                if (child.stdin) {
+                  if (input) {
                     child.stdin.write(input);
-                    child.stdin.end();
+                  }
+                  child.stdin.end();
                 }
             });
 
