@@ -8,33 +8,13 @@ interface HashMapVisualizerProps {
     variableName: string;
 }
 
-/** Simple hash: sum of char codes % bucketCount */
-function hashKey(key: string, buckets: number): number {
-    let h = 0;
-    for (let i = 0; i < key.length; i++) h = (h + key.charCodeAt(i)) % buckets;
-    return h;
-}
-
 export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, variableName }) => {
     const raw = heap[variableName];
 
-    // Extract key-value pairs from the hydrated hashmap object
-    // The object has __viz_type, __viz_id, and then all the actual k/v pairs
+    // Extract key-value pairs — skip internal metadata fields
     const entries: [string, any][] = raw && typeof raw === 'object'
         ? Object.entries(raw).filter(([k]) => k !== '__viz_type' && k !== '__viz_id')
         : [];
-
-    const BUCKET_COUNT = 8;
-
-    const buckets: { index: number; entries: [string, any][] }[] = Array.from(
-        { length: BUCKET_COUNT },
-        (_, i) => ({ index: i, entries: [] })
-    );
-
-    entries.forEach(([key, value]) => {
-        const b = hashKey(String(key), BUCKET_COUNT);
-        buckets[b].entries.push([key, value]);
-    });
 
     const formatValue = (v: any): string => {
         if (v === null || v === undefined) return 'null';
@@ -49,82 +29,63 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                 <div className="text-theme-secondary text-xs font-mono uppercase tracking-[0.2em]">
                     HashMap <span className="text-theme-tertiary">|</span>{' '}
                     <span className="text-accent font-bold">{variableName}</span>
-                    <span className="text-theme-tertiary ml-2 text-[10px]">
-                        {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
-                    </span>
                 </div>
-                <div className="text-[10px] text-theme-secondary opacity-50 font-mono">
-                    {BUCKET_COUNT} buckets
-                </div>
+                <span className="text-[10px] text-theme-secondary font-mono opacity-60">
+                    {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+                </span>
             </div>
 
-            {/* Bucket grid */}
-            <div className="flex-grow flex items-start justify-center gap-2 overflow-auto pb-2">
-                {buckets.map((bucket) => (
-                    <div key={bucket.index} className="flex flex-col items-center gap-1.5 min-w-[80px]">
-                        {/* Bucket index label */}
-                        <div className={`text-[10px] font-mono font-bold transition-colors ${
-                            bucket.entries.length > 0 ? 'text-accent' : 'text-theme-secondary opacity-40'
-                        }`}>
-                            [{bucket.index}]
-                        </div>
+            {/* Table */}
+            <div className="flex-grow overflow-auto">
+                {entries.length > 0 ? (
+                    <table className="w-full border-collapse font-mono text-sm">
+                        <thead>
+                            <tr className="border-b border-theme">
+                                <th className="text-left text-[10px] uppercase tracking-widest text-theme-secondary font-bold pb-2 pr-4 w-1/2">
+                                    Key
+                                </th>
+                                <th className="text-left text-[10px] uppercase tracking-widest text-theme-secondary font-bold pb-2 w-1/2">
+                                    Value
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {entries.map(([key, value], idx) => (
+                                <tr
+                                    key={key}
+                                    className={`border-b border-theme/50 transition-colors ${
+                                        idx % 2 === 0 ? 'bg-theme-tertiary/10' : ''
+                                    }`}
+                                >
+                                    {/* Key cell — stable, no animation */}
+                                    <td className="py-2 pr-4 text-accent font-bold truncate max-w-0">
+                                        {String(key)}
+                                    </td>
 
-                        {/* Bucket slot */}
-                        <div className={`w-full min-h-[80px] rounded-xl border transition-colors duration-200 p-1.5 flex flex-col gap-1.5 ${
-                            bucket.entries.length > 0
-                                ? 'border-accent/30 bg-accent/5'
-                                : 'border-theme bg-theme-tertiary/20'
-                        }`}>
-                            {bucket.entries.map(([key, value]) => (
-                                    <div
-                                        key={key}
-                                        className="rounded-lg border border-accent/40 bg-accent/10 p-1.5 flex flex-col gap-0.5"
-                                    >
-                                        {/* Key */}
-                                        <div className="text-accent font-bold text-[11px] font-mono truncate leading-tight">
-                                            {String(key)}
-                                        </div>
-                                        {/* Separator */}
-                                        <div className="w-full h-px bg-accent/20" />
-                                        {/* Value — only animate when value changes */}
-                                        <motion.div
+                                    {/* Value cell — animates only when value changes */}
+                                    <td className="py-2 text-theme-primary font-semibold truncate max-w-0">
+                                        <motion.span
                                             key={`${key}-${formatValue(value)}`}
-                                            initial={{ opacity: 0.4, scale: 0.9 }}
-                                            animate={{ opacity: 1, scale: 1 }}
-                                            transition={{ duration: 0.15 }}
-                                            className="text-theme-primary text-[11px] font-mono truncate leading-tight font-semibold"
+                                            initial={{ opacity: 0.3, x: -4 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="inline-block"
                                         >
                                             {formatValue(value)}
-                                        </motion.div>
-                                    </div>
-                                ))}
-
-                            {/* Empty bucket indicator */}
-                            {bucket.entries.length === 0 && (
-                                <div className="flex-grow flex items-center justify-center">
-                                    <div className="w-6 h-0.5 bg-theme-secondary/20 rounded-full" />
-                                </div>
-                            )}
+                                        </motion.span>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                ) : (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="text-theme-secondary font-mono text-sm border-2 border-dashed border-theme rounded-xl p-8 text-center opacity-50">
+                            Map is empty
                         </div>
-
-                        {/* Collision indicator */}
-                        {bucket.entries.length > 1 && (
-                            <div className="text-[9px] text-orange-400 font-mono font-bold">
-                                ×{bucket.entries.length}
-                            </div>
-                        )}
                     </div>
-                ))}
+                )}
             </div>
-
-            {/* Empty state */}
-            {entries.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="text-theme-secondary font-mono text-sm border-2 border-dashed border-theme rounded-xl p-8 text-center opacity-50">
-                        Map is empty
-                    </div>
-                </div>
-            )}
         </div>
     );
 };
