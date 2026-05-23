@@ -75,8 +75,7 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                                 ? 'border-accent/30 bg-accent/5'
                                 : 'border-theme bg-theme-tertiary/20'
                         }`}>
-                            <AnimatePresence mode="popLayout">
-                                {bucket.entries.map(([key, value]) => (
+                            {bucket.entries.map(([key, value]) => (
                                     <div
                                         key={key}
                                         className="rounded-lg border border-accent/40 bg-accent/10 p-1.5 flex flex-col gap-0.5"
@@ -99,7 +98,6 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                                         </motion.div>
                                     </div>
                                 ))}
-                            </AnimatePresence>
 
                             {/* Empty bucket indicator */}
                             {bucket.entries.length === 0 && (
