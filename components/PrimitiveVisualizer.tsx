@@ -45,7 +45,7 @@ export const PrimitiveVisualizer: React.FC<PrimitiveVisualizerProps> = ({
         }
 
         const prev = prevValueRef.current;
-        if (typeof prev === 'number' && typeof value === 'number' && prev !== value) {
+        if (value !== '__anim_blank__' && typeof prev === 'number' && typeof value === 'number' && prev !== value) {
             const diff = value - prev;
             const diffText = diff > 0 ? `+${diff}` : `${diff}`;
             const color = diff > 0 ? 'text-green-500' : 'text-red-500';
@@ -88,7 +88,11 @@ export const PrimitiveVisualizer: React.FC<PrimitiveVisualizerProps> = ({
 
             {/* Value */}
             <span className="text-xl font-mono text-accent relative">
-                {String(value)}
+                {value === '__anim_blank__' ? (
+                    <span className="opacity-20">—</span>
+                ) : (
+                    String(value)
+                )}
 
                 {/* Floating Animations */}
                 <AnimatePresence>

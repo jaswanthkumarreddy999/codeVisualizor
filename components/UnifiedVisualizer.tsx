@@ -482,9 +482,10 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
             {visualizedVariables.map(varName => {
                 const heapValue = heap[varName];
-                // Apply overrides if animation is active for this variable
-                const value = (currentOverrideValues[varName] !== undefined)
-                    ? currentOverrideValues[varName]
+                // During animation targeting this variable, show blank until animation completes
+                const isAnimTarget = !!(activeAnim && activeAnim.target && activeAnim.target.name === varName);
+                const value = isAnimTarget
+                    ? (prevHeap?.[varName] !== undefined ? prevHeap[varName] : '__anim_blank__')
                     : heapValue;
 
                 if (value === undefined) return null;
