@@ -628,10 +628,11 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         drag
                         dragMomentum={false}
                         dragElastic={0}
+                        dragTransition={{ power: 0, timeConstant: 0 }}
                         initial={false}
                         onDragEnd={() => handleDragEnd(varName)}
-                        whileHover={{ cursor: 'grab', scale: 1.01 }}
-                        whileDrag={{ cursor: 'grabbing', scale: 1.02, zIndex: 100 }}
+                        whileHover={{ cursor: 'grab', scale: 1.005, transition: { duration: 0.1 } }}
+                        whileDrag={{ cursor: 'grabbing', scale: 1.01, zIndex: 100 }}
                         onClick={(e) => { e.stopPropagation(); setSelectedVar(varName); }}
                         className={`group ${ContainerClasses}`}
                         style={{
@@ -642,6 +643,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             left: 0,
                             x: pos.x,
                             y: pos.y,
+                            willChange: 'transform',
                         }}
                     >
                         {Content}
