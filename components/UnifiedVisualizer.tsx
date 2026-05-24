@@ -397,14 +397,15 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         }
     };
 
-    const handleResize = (name: string, e: React.MouseEvent, direction: string) => {
+    const handleResize = (name: string, e: React.MouseEvent | React.PointerEvent, direction: string) => {
         e.stopPropagation();
+        e.preventDefault();
         const startX = e.clientX;
         const startY = e.clientY;
         const startWidth = sizes[name]?.width || 150;
         const startHeight = sizes[name]?.height || 100;
 
-        const onMouseMove = (moveEvent: MouseEvent) => {
+        const onMouseMove = (moveEvent: PointerEvent) => {
             const deltaX = moveEvent.clientX - startX;
             const deltaY = moveEvent.clientY - startY;
 
@@ -418,12 +419,12 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         };
 
         const onMouseUp = () => {
-            window.removeEventListener('mousemove', onMouseMove);
-            window.removeEventListener('mouseup', onMouseUp);
+            window.removeEventListener('pointermove', onMouseMove);
+            window.removeEventListener('pointerup', onMouseUp);
         };
 
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
+        window.addEventListener('pointermove', onMouseMove);
+        window.addEventListener('pointerup', onMouseUp);
     };
 
     return (
@@ -657,7 +658,10 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         {selectedVar === varName && (
                             <div
                                 className="absolute bottom-1 right-1 w-4 h-4 cursor-nwse-resize z-50 flex items-center justify-center opacity-50 hover:opacity-100"
-                                onMouseDown={(e) => handleResize(varName, e, 'se')}
+                                onPointerDown={(e) => {
+                                    e.stopPropagation(); // prevent Framer Motion drag from starting
+                                    handleResize(varName, e as unknown as React.MouseEvent, 'se');
+                                }}
                             >
                                 <div className="w-0 h-0 border-l-[8px] border-l-transparent border-b-[8px] border-b-accent/50 max-w-full max-h-full" />
                             </div>
