@@ -627,14 +627,22 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         ref={(el) => { itemsRef.current[varName] = el; }}
                         drag
                         dragMomentum={false}
-                        initial={pos}
-                        animate={pos}
+                        dragElastic={0}
+                        initial={false}
                         onDragEnd={() => handleDragEnd(varName)}
                         whileHover={{ cursor: 'grab', scale: 1.01 }}
                         whileDrag={{ cursor: 'grabbing', scale: 1.02, zIndex: 100 }}
                         onClick={(e) => { e.stopPropagation(); setSelectedVar(varName); }}
                         className={`group ${ContainerClasses}`}
-                        style={{ width: currentSize.width, height: currentSize.height }} // Drive size via state
+                        style={{
+                            width: currentSize.width,
+                            height: currentSize.height,
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            x: pos.x,
+                            y: pos.y,
+                        }}
                     >
                         {Content}
 
