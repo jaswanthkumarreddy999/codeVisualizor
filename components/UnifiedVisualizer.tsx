@@ -427,6 +427,45 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         window.addEventListener('pointerup', onMouseUp);
     };
 
+    // Pinch-to-resize: track two touch points and scale size by distance change
+    const pinchRef = React.useRef<{ dist: number; w: number; h: number } | null>(null);
+
+    const handleTouchStart = (name: string, e: React.TouchEvent) => {
+        if (e.touches.length === 2) {
+            e.stopPropagation();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            pinchRef.current = {
+                dist,
+                w: sizes[name]?.width || 400,
+                h: sizes[name]?.height || 300,
+            };
+        }
+    };
+
+    const handleTouchMove = (name: string, e: React.TouchEvent) => {
+        if (e.touches.length === 2 && pinchRef.current) {
+            e.stopPropagation();
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const newDist = Math.sqrt(dx * dx + dy * dy);
+            const scale = newDist / pinchRef.current.dist;
+            setSizes(prev => ({
+                ...prev,
+                [name]: {
+                    width: Math.max(100, Math.round(pinchRef.current!.w * scale)),
+                    height: Math.max(80, Math.round(pinchRef.current!.h * scale)),
+                }
+            }));
+        }
+    };
+
+    const handleTouchEnd = () => {
+        pinchRef.current = null;
+    };
+
     return (
         <div
             ref={containerRef}
@@ -638,6 +677,9 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         whileHover={{ cursor: 'grab', scale: 1.005, transition: { duration: 0.1 } }}
                         whileDrag={{ cursor: 'grabbing', scale: 1.01, zIndex: 100 }}
                         onClick={(e) => { e.stopPropagation(); setSelectedVar(varName); }}
+                        onTouchStart={(e) => handleTouchStart(varName, e)}
+                        onTouchMove={(e) => handleTouchMove(varName, e)}
+                        onTouchEnd={handleTouchEnd}
                         className={`group ${ContainerClasses}`}
                         style={{
                             width: currentSize.width,
