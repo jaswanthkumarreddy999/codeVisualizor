@@ -72,7 +72,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
 
     const [selectedVar, setSelectedVar] = React.useState<string | null>(null);
     const [viewModes, setViewModes] = React.useState<Record<string, 'bar' | 'box' | 'stack'>>({});
-    const [explicitPointers, setExplicitPointers] = React.useState<Record<string, string[]>>({});
+    // explicitPointers: { arrayVarName: { pointerName: 'index' | 'value' | 'search' } }
+    const [explicitPointers, setExplicitPointers] = React.useState<Record<string, Record<string, 'index' | 'value' | 'search'>>>({});
     // Store absolute positions (x, y) relative to the container
     const [positions, setPositions] = React.useState<Record<string, { x: number, y: number }>>(initialPositions || {});
     // Store sizes (width, height)
@@ -550,15 +551,16 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             <MatrixVisualizer
                                 heap={heap}
                                 variableName={varName}
-                                activePointers={explicitPointers[varName] || []}
+                                activePointers={Object.keys(explicitPointers[varName] || {})}
                                 onAddPointer={(pointerName) => setExplicitPointers(prev => {
-                                    const current = prev[varName] || [];
-                                    if (current.includes(pointerName)) return prev;
-                                    return { ...prev, [varName]: [...current, pointerName] };
+                                    const current = prev[varName] || {};
+                                    if (current[pointerName]) return prev;
+                                    return { ...prev, [varName]: { ...current, [pointerName]: 'index' } };
                                 })}
                                 onRemovePointer={(pointerName) => setExplicitPointers(prev => {
-                                    const current = prev[varName] || [];
-                                    return { ...prev, [varName]: current.filter(p => p !== pointerName) };
+                                    const current = { ...(prev[varName] || {}) };
+                                    delete current[pointerName];
+                                    return { ...prev, [varName]: current };
                                 })}
                             />
                         );
@@ -568,15 +570,26 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                                 {...commonProps}
                                 viewMode={viewModes[varName] || 'bar'}
                                 onViewModeChange={(mode) => setViewModes(prev => ({ ...prev, [varName]: mode }))}
-                                activePointers={explicitPointers[varName] || []}
+                                activePointers={Object.keys(explicitPointers[varName] || {})}
+                                pointerModes={explicitPointers[varName] || {}}
                                 onAddPointer={(pointerName) => setExplicitPointers(prev => {
-                                    const current = prev[varName] || [];
-                                    if (current.includes(pointerName)) return prev;
-                                    return { ...prev, [varName]: [...current, pointerName] };
+                                    const current = prev[varName] || {};
+                                    if (current[pointerName]) return prev;
+                                    // Auto-detect default mode: foreach → value, others → index
+                                    const defaultMode: 'index' | 'value' | 'search' = 'index';
+                                    return { ...prev, [varName]: { ...current, [pointerName]: defaultMode } };
                                 })}
                                 onRemovePointer={(pointerName) => setExplicitPointers(prev => {
-                                    const current = prev[varName] || [];
-                                    return { ...prev, [varName]: current.filter(p => p !== pointerName) };
+                                    const current = { ...(prev[varName] || {}) };
+                                    delete current[pointerName];
+                                    return { ...prev, [varName]: current };
+                                })}
+                                onTogglePointerMode={(pointerName) => setExplicitPointers(prev => {
+                                    const current = prev[varName] || {};
+                                    const modes: ('index' | 'value' | 'search')[] = ['index', 'value', 'search'];
+                                    const cur = current[pointerName] || 'index';
+                                    const next = modes[(modes.indexOf(cur) + 1) % modes.length];
+                                    return { ...prev, [varName]: { ...current, [pointerName]: next } };
                                 })}
                             />
                         );
