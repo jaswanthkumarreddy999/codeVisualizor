@@ -55,13 +55,41 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
         });
         const data = await res.json();
         if (data.error) {
-          // Format compilation errors: strip temp file path, clean up javac output
-          const rawStderr = data.stderr || '';
-          const cleanCompileError = rawStderr
+          // Parse javac stderr into clean, concise error messages
+          const rawStderr = (data.stderr || '')
             .replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '')
             .replace(/\/[^\s]*\/Main\.java/g, 'Main.java')
             .trim();
-          setOutputVal(`⚠ Compilation Error:\n${cleanCompileError || data.error}`);
+
+          // Extract individual errors: "Main.java:N: error: <message>"
+          const errorLines = rawStderr.split('\n');
+          const errors: string[] = [];
+          for (let i = 0; i < errorLines.length; i++) {
+            const match = errorLines[i].match(/Main\.java:(\d+):\s*error:\s*(.+)/);
+            if (match) {
+              const lineNum = match[1];
+              const msg = match[2].trim();
+              // Look ahead for symbol/location details
+              let detail = '';
+              for (let j = i + 1; j < Math.min(i + 4, errorLines.length); j++) {
+                const sym = errorLines[j].match(/symbol:\s*(.+)/);
+                if (sym) { detail = ` (${sym[1].trim()})`; break; }
+              }
+              errors.push(`Line ${lineNum}: ${msg}${detail}`);
+            }
+          }
+
+          // Fallback: show raw if parsing failed
+          const errorCount = rawStderr.match(/(\d+) error/)?.[1];
+          const summary = errors.length > 0
+            ? errors.join('\n')
+            : (data.error === 'Compilation Failed' ? rawStderr : data.error);
+
+          const header = errorCount
+            ? `⚠ ${errorCount} Compilation Error${Number(errorCount) > 1 ? 's' : ''}:`
+            : '⚠ Compilation Error:';
+
+          setOutputVal(`${header}\n${summary}`);
         } else {
           // Clean up JVM noise from stderr
           const cleanStderr = data.stderr
