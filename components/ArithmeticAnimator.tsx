@@ -58,7 +58,7 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
             // Simple: operands fly to meeting point (600ms), result flies to target (600ms), done
             t1 = setTimeout(() => setStage(1), 600);   // operands arrive
             t2 = setTimeout(() => setStage(2), 1200);  // result flies to target
-            t3 = setTimeout(() => onComplete(), 1800); // done
+            t3 = setTimeout(() => onComplete(), 1300); // reveal target 0.5s earlier
         }
 
         return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4); clearTimeout(t5); };
@@ -110,25 +110,27 @@ export const ArithmeticAnimator: React.FC<ArithmeticAnimatorProps> = ({
                                 x: '-50%',
                                 y: '-50%',
                                 scale: 1,
-                                opacity: 1,
+                                opacity: 0,
                             }}
                             animate={stage === 0 ? {
-                                // Stay at source until stage 1
                                 left: visibleOperands[0].startPos!.x,
                                 top: visibleOperands[0].startPos!.y,
+                                opacity: 1,
                             } : {
-                                // Fly to target
                                 left: target!.endPos.x,
                                 top: target!.endPos.y,
                                 scale: 0.7,
                                 opacity: 0,
                             }}
-                            transition={{ duration: 0.55, ease: [0.4, 0, 0.2, 1] }}
+                            transition={stage === 0
+                                ? { duration: 0.4, ease: 'easeOut' }
+                                : { duration: 0.55, ease: [0.4, 0, 0.2, 1] }
+                            }
                         >
-                            <div className="bg-accent text-white px-3 py-1.5 rounded-lg border border-white/20 shadow-[0_0_20px_var(--accent-light)] font-mono font-bold text-lg whitespace-nowrap">
+                            <div className="bg-accent text-white px-4 py-2 rounded-xl border border-white/20 shadow-[0_0_24px_var(--accent-light)] font-mono font-bold text-xl whitespace-nowrap">
                                 {String(operands[0].value)}
                             </div>
-                            <div className="text-[10px] text-center text-theme-secondary mt-1 font-bold">
+                            <div className="text-[11px] text-center text-theme-secondary mt-1 font-bold">
                                 {operands[0].name}
                             </div>
                         </motion.div>
