@@ -121,7 +121,7 @@ export default function Home() {
             <IOPanel
               inputVal={exe.inputVal}
               onInputChange={exe.setInputVal}
-              outputVal={currentSnapshot.stdout ?? exe.outputVal}
+              outputVal={currentSnapshot.stdout || exe.outputVal}
               isIOCollapsed={layout.isIOCollapsed}
               onToggleIO={layout.toggleIO}
               inputWidth={layout.inputWidth}

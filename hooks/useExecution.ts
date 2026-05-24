@@ -37,9 +37,12 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
           body: JSON.stringify({ code, input: inputVal })
         });
         const data = await res.json();
-        if (data.error) setOutputVal(`Error: ${data.error}\n${data.stderr || ''}`);
-        if (data.stdout) setOutputVal(data.stdout);
-        if (data.history) setHistory(hydrateBackendHistory(data.history, code));
+        if (data.error) {
+          setOutputVal(`Error: ${data.error}\n${data.stderr || ''}`);
+        } else {
+          if (data.stdout) setOutputVal(data.stdout);
+          if (data.history) setHistory(hydrateBackendHistory(data.history, code));
+        }
       } else {
         const endpoint = language === 'java' ? '/api/run-java'
           : language === 'c' ? '/api/run-c'
@@ -52,7 +55,13 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
         });
         const data = await res.json();
         if (data.error) {
-          setOutputVal(`Error: ${data.error}\n${data.stderr || ''}`);
+          // Format compilation errors: strip temp file path, clean up javac output
+          const rawStderr = data.stderr || '';
+          const cleanCompileError = rawStderr
+            .replace(/^Picked up JAVA_TOOL_OPTIONS:.*\n?/gm, '')
+            .replace(/\/[^\s]*\/Main\.java/g, 'Main.java')
+            .trim();
+          setOutputVal(`⚠ Compilation Error:\n${cleanCompileError || data.error}`);
         } else {
           // Clean up JVM noise from stderr
           const cleanStderr = data.stderr
