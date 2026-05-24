@@ -457,7 +457,9 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
             cleanup.push(() => el.removeEventListener('wheel', fn));
         });
         return () => cleanup.forEach(fn => fn());
-    });
+    // Re-attach when variables change or refs update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visualizedVariables.join(','), handleWheel]);
 
     // Touch pinch-to-resize: track two touch points and scale size by distance change
     const pinchRef = React.useRef<{ dist: number; w: number; h: number } | null>(null);

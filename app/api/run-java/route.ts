@@ -562,7 +562,8 @@ ${processedScript}
             await logDebug(`[${id}] Compilation Failed: ${compileError.stderr || compileError.message}`);
             return NextResponse.json({
                 error: "Compilation Failed",
-                stderr: compileError.stderr || compileError.message
+                stderr: compileError.stderr || compileError.message,
+                lineOffset  // include so frontend can map error lines to original
             });
         }
 

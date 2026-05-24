@@ -62,12 +62,14 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
             .trim();
 
           // Extract individual errors: "Main.java:N: error: <message>"
+          // Subtract lineOffset to map formatted file line → original editor line
+          const offset = data.lineOffset || 0;
           const errorLines = rawStderr.split('\n');
           const errors: string[] = [];
           for (let i = 0; i < errorLines.length; i++) {
             const match = errorLines[i].match(/Main\.java:(\d+):\s*error:\s*(.+)/);
             if (match) {
-              const lineNum = match[1];
+              const lineNum = Math.max(1, parseInt(match[1]) - offset);
               const msg = match[2].trim();
               // Look ahead for symbol/location details
               let detail = '';
