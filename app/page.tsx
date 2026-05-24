@@ -118,10 +118,14 @@ export default function Home() {
               )}
             </div>
 
+            {/* STDOUT display logic:
+                - No history (not run / compile error): show exe.outputVal
+                - History exists: use currentSnapshot.stdout (step-accurate)
+                - DO NOT change — ensures output only appears after println executes */}
             <IOPanel
               inputVal={exe.inputVal}
               onInputChange={exe.setInputVal}
-              outputVal={currentSnapshot.stdout || exe.outputVal}
+              outputVal={exe.history.length === 0 ? exe.outputVal : (currentSnapshot.stdout || '')}
               isIOCollapsed={layout.isIOCollapsed}
               onToggleIO={layout.toggleIO}
               inputWidth={layout.inputWidth}
