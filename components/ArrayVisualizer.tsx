@@ -73,6 +73,7 @@ interface ArrayVisualizerProps {
     onAddPointer?: (name: string) => void;
     onRemovePointer?: (name: string) => void;
     onTogglePointerMode?: (name: string) => void;
+    frozen?: boolean; // when true, skip animations (during drag)
 }
 
 
@@ -89,7 +90,8 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
     pointerModes = {},
     onAddPointer,
     onRemovePointer,
-    onTogglePointerMode
+    onTogglePointerMode,
+    frozen = false
 }) => {
     // 1. Identify arrays in the heap
     const arrayName = variableName;
@@ -263,6 +265,7 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                         <motion.div
                                             initial={{ height: 0 }}
                                             animate={{ height: `${(heightPct / (heightPct + waterHeightPct)) * 100}%` }}
+                                            transition={frozen ? { duration: 0 } : undefined}
                                             className={`w-full relative overflow-hidden transition-all duration-300 ${isActiveByValue
                                                 ? 'bg-gradient-to-t from-teal-600 to-teal-400 shadow-[0_0_30px_rgba(20,184,166,0.3)]'
                                                 : isActiveBySearch

@@ -347,6 +347,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         });
     }, [visualizedVariables, heap]);
 
+    const [draggingVar, setDraggingVar] = React.useState<string | null>(null);
     const containerRef = React.useRef<HTMLDivElement>(null);
     const itemsRef = React.useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -572,6 +573,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                                 onViewModeChange={(mode) => setViewModes(prev => ({ ...prev, [varName]: mode }))}
                                 activePointers={Object.keys(explicitPointers[varName] || {})}
                                 pointerModes={explicitPointers[varName] || {}}
+                                frozen={draggingVar === varName}
                                 onAddPointer={(pointerName) => setExplicitPointers(prev => {
                                     const current = prev[varName] || {};
                                     if (current[pointerName]) return prev;
@@ -630,7 +632,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         dragElastic={0}
                         dragTransition={{ power: 0, timeConstant: 0 }}
                         initial={false}
-                        onDragEnd={() => handleDragEnd(varName)}
+                        onDragStart={() => setDraggingVar(varName)}
+                        onDragEnd={() => { setDraggingVar(null); handleDragEnd(varName); }}
                         whileHover={{ cursor: 'grab', scale: 1.005, transition: { duration: 0.1 } }}
                         whileDrag={{ cursor: 'grabbing', scale: 1.01, zIndex: 100 }}
                         onClick={(e) => { e.stopPropagation(); setSelectedVar(varName); }}
@@ -644,6 +647,8 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             x: pos.x,
                             y: pos.y,
                             willChange: 'transform',
+                            // Freeze pointer events on content during drag to prevent re-render interruptions
+                            pointerEvents: draggingVar === varName ? 'none' : undefined,
                         }}
                     >
                         {Content}
