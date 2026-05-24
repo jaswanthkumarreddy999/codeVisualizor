@@ -427,7 +427,39 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
         window.addEventListener('pointerup', onMouseUp);
     };
 
-    // Pinch-to-resize: track two touch points and scale size by distance change
+    // Trackpad pinch-to-resize: pinch on trackpad fires as wheel + ctrlKey
+    // Must use native addEventListener with passive:false to call preventDefault()
+    const handleWheel = React.useCallback((name: string, e: WheelEvent) => {
+        if (!e.ctrlKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const scaleFactor = e.deltaY < 0 ? 1.05 : 0.95;
+        setSizes(prev => {
+            const current = prev[name] || { width: 400, height: 300 };
+            return {
+                ...prev,
+                [name]: {
+                    width: Math.max(100, Math.round(current.width * scaleFactor)),
+                    height: Math.max(80, Math.round(current.height * scaleFactor)),
+                }
+            };
+        });
+    }, []);
+
+    // Attach non-passive wheel listeners so preventDefault() works for trackpad pinch
+    React.useEffect(() => {
+        const cleanup: Array<() => void> = [];
+        visualizedVariables.forEach(varName => {
+            const el = itemsRef.current[varName];
+            if (!el) return;
+            const fn = (e: WheelEvent) => handleWheel(varName, e);
+            el.addEventListener('wheel', fn, { passive: false });
+            cleanup.push(() => el.removeEventListener('wheel', fn));
+        });
+        return () => cleanup.forEach(fn => fn());
+    });
+
+    // Touch pinch-to-resize: track two touch points and scale size by distance change
     const pinchRef = React.useRef<{ dist: number; w: number; h: number } | null>(null);
 
     const handleTouchStart = (name: string, e: React.TouchEvent) => {
