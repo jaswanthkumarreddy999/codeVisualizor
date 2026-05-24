@@ -1,8 +1,64 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BarChart2, StretchHorizontal, Layers } from 'lucide-react';
+
+// Pointer label with single-click = cycle mode, double-click = remove
+// Uses a timer to distinguish the two — double-click cancels the single-click action
+const PointerLabel: React.FC<{
+    name: string;
+    kind: string;
+    onToggleMode: () => void;
+    onRemove: () => void;
+    direction?: 'up' | 'left';
+}> = ({ name, kind, onToggleMode, onRemove, direction = 'up' }) => {
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    const modeColors: Record<string, string> = {
+        index: 'bg-accent', foreach: 'bg-teal-500', value: 'bg-teal-500', search: 'bg-amber-500',
+    };
+    const modeIcons: Record<string, string> = { index: '#', value: '≈', search: '?', foreach: '→' };
+    const arrowColor = kind === 'search' ? 'rgb(245,158,11)' : (kind === 'value' || kind === 'foreach') ? 'rgb(20,184,166)' : 'var(--accent)';
+
+    const handleClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (timerRef.current) return; // already waiting — this is the 2nd click of a dblclick
+        timerRef.current = setTimeout(() => {
+            timerRef.current = null;
+            onToggleMode();
+        }, 220);
+    };
+
+    const handleDoubleClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+        onRemove();
+    };
+
+    return (
+        <motion.div
+            key={name}
+            initial={{ opacity: 0, y: direction === 'up' ? 10 : 0, x: direction === 'left' ? 10 : 0, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
+            className={`px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap cursor-pointer transition-colors flex items-center gap-1 ${modeColors[kind] || 'bg-accent'}`}
+            onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
+            title={`Mode: ${kind} — click to cycle (index→value→search), double-click to remove`}
+        >
+            <span className="opacity-60 text-[8px]">{modeIcons[kind] || '#'}</span>
+            {name}
+            {direction === 'up' && (
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[4px]"
+                    style={{ borderBottomColor: arrowColor }} />
+            )}
+            {direction === 'left' && (
+                <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-0 h-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[4px]"
+                    style={{ borderLeftColor: arrowColor }} />
+            )}
+        </motion.div>
+    );
+};
 
 interface ArrayVisualizerProps {
     heap: Record<string, any>;
@@ -256,36 +312,18 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                     <div className="absolute -bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 w-max z-10">
                                         <div className="flex flex-col gap-1 items-center">
                                             {pointers.filter(p => {
-                                                if (p.kind === 'index') return p.value === idx;
-                                                if (p.kind === 'foreach') return p.value === idx;
-                                                if (p.kind === 'value') return resolveValue(rawVal) === p.value;
-                                                if (p.kind === 'search') return resolveValue(rawVal) === p.value;
-                                                return false;
-                                            }).map(p => {
-                                                const modeColors: Record<string, string> = {
-                                                    index: 'bg-accent',
-                                                    foreach: 'bg-teal-500',
-                                                    value: 'bg-teal-500',
-                                                    search: 'bg-amber-500',
-                                                };
-                                                const modeIcons: Record<string, string> = { index: '#', value: '≈', search: '?', foreach: '→' };
-                                                return (
-                                                    <motion.div
-                                                        key={p.name}
-                                                        initial={{ opacity: 0, y: 10, scale: 0.8 }}
-                                                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                                                        className={`px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap cursor-pointer transition-colors flex items-center gap-1 ${modeColors[p.kind] || 'bg-accent'}`}
-                                                        onClick={(e) => { e.stopPropagation(); onTogglePointerMode?.(p.name); }}
-                                                        onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
-                                                        title={`Mode: ${p.kind} — click to cycle mode, double-click to remove`}
-                                                    >
-                                                        <span className="opacity-60 text-[8px]">{modeIcons[p.kind]}</span>
-                                                        {p.name}
-                                                        <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-b-[4px]"
-                                                            style={{ borderBottomColor: p.kind === 'search' ? 'rgb(245,158,11)' : p.kind === 'value' || p.kind === 'foreach' ? 'rgb(20,184,166)' : 'var(--accent)' }} />
-                                                    </motion.div>
-                                                );
-                                            })}
+                                                if (p.kind === 'index' || p.kind === 'foreach') return p.value === idx;
+                                                return resolveValue(rawVal) === p.value;
+                                            }).map(p => (
+                                                <PointerLabel
+                                                    key={p.name}
+                                                    name={p.name}
+                                                    kind={p.kind}
+                                                    direction="up"
+                                                    onToggleMode={() => onTogglePointerMode?.(p.name)}
+                                                    onRemove={() => onRemovePointer?.(p.name)}
+                                                />
+                                            ))}
                                         </div>
                                     </div>
                                 </div>
@@ -316,27 +354,20 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                 >
                                     {/* Pointer Labels (Side) */}
                                     {pointers.filter(p =>
-                                        (p.kind === 'index' && p.value === idx) ||
-                                        (p.kind === 'foreach' ? p.value === idx : (p.kind === 'value' && resolveValue(rawVal) === p.value))
+                                        (p.kind === 'index' || p.kind === 'foreach') ? p.value === idx : resolveValue(rawVal) === p.value
                                     ).length > 0 && (
                                         <div className="absolute right-full mr-4 top-1/2 -translate-y-1/2 flex flex-col items-end gap-1 w-max z-10">
                                             {pointers.filter(p =>
-                                                (p.kind === 'index' && p.value === idx) ||
-                                                (p.kind === 'foreach' ? p.value === idx : (p.kind === 'value' && resolveValue(rawVal) === p.value))
+                                                (p.kind === 'index' || p.kind === 'foreach') ? p.value === idx : resolveValue(rawVal) === p.value
                                             ).map(p => (
-                                                <motion.div
+                                                <PointerLabel
                                                     key={p.name}
-                                                    initial={{ opacity: 0, x: 10 }}
-                                                    animate={{ opacity: 1, x: 0 }}
-                                                    className={`px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1 ${(p.kind === 'foreach' || p.kind === 'value') ? 'bg-teal-500' : 'bg-accent'}`}
-                                                    onClick={(e) => { e.stopPropagation(); }}
-                                                    onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
-                                                    title="Double click to remove pointer"
-                                                >
-                                                    {p.kind === 'value' ? `${p.name}=${p.value}` : p.name}
-                                                    <div className="absolute top-1/2 -right-1 -translate-y-1/2 w-0 h-0 border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent border-l-[4px]"
-                                                        style={{ borderLeftColor: (p.kind === 'foreach' || p.kind === 'value') ? 'rgb(20,184,166)' : 'var(--accent)' }} />
-                                                </motion.div>
+                                                    name={p.name}
+                                                    kind={p.kind}
+                                                    direction="left"
+                                                    onToggleMode={() => onTogglePointerMode?.(p.name)}
+                                                    onRemove={() => onRemovePointer?.(p.name)}
+                                                />
                                             ))}
                                         </div>
                                     )}
@@ -381,27 +412,20 @@ export const ArrayVisualizer: React.FC<ArrayVisualizerProps> = ({
                                 >
                                     {/* Pointer Labels (Top) */}
                                     {pointers.filter(p =>
-                                        (p.kind === 'index' && p.value === idx) ||
-                                        (p.kind === 'foreach' ? p.value === idx : (p.kind === 'value' && resolveValue(rawVal) === p.value))
+                                        (p.kind === 'index' || p.kind === 'foreach') ? p.value === idx : resolveValue(rawVal) === p.value
                                     ).length > 0 && (
                                         <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 w-max z-10">
                                             {pointers.filter(p =>
-                                                (p.kind === 'index' && p.value === idx) ||
-                                                (p.kind === 'foreach' ? p.value === idx : (p.kind === 'value' && resolveValue(rawVal) === p.value))
+                                                (p.kind === 'index' || p.kind === 'foreach') ? p.value === idx : resolveValue(rawVal) === p.value
                                             ).map(p => (
-                                                <motion.div
+                                                <PointerLabel
                                                     key={p.name}
-                                                    initial={{ opacity: 0, y: 10 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    className={`px-2 py-0.5 rounded-md text-white text-[10px] font-bold shadow-lg whitespace-nowrap cursor-pointer hover:bg-red-500 transition-colors flex items-center gap-1 ${(p.kind === 'foreach' || p.kind === 'value') ? 'bg-teal-500' : 'bg-accent'}`}
-                                                    onClick={(e) => { e.stopPropagation(); }}
-                                                    onDoubleClick={(e) => { e.stopPropagation(); onRemovePointer?.(p.name); }}
-                                                    title={(p.kind === 'foreach' || p.kind === 'value') ? `${p.name} = ${p.value} (current value)` : 'Double click to remove'}
-                                                >
-                                                    {p.kind === 'value' ? `${p.name}=${p.value}` : p.name}
-                                                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[3px] border-l-transparent border-r-[3px] border-r-transparent border-t-[4px]"
-                                                        style={{ borderTopColor: (p.kind === 'foreach' || p.kind === 'value') ? 'rgb(20,184,166)' : 'var(--accent)' }} />
-                                                </motion.div>
+                                                    name={p.name}
+                                                    kind={p.kind}
+                                                    direction="up"
+                                                    onToggleMode={() => onTogglePointerMode?.(p.name)}
+                                                    onRemove={() => onRemovePointer?.(p.name)}
+                                                />
                                             ))}
                                         </div>
                                     )}
