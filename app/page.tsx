@@ -16,6 +16,7 @@ import { usePersistence } from '@/hooks/usePersistence';
 import { useExecution } from '@/hooks/useExecution';
 
 import { ChevronLeft, ChevronRight, PanelLeftOpen, PanelRightOpen } from 'lucide-react';
+import { SavedProject } from '@/types/Project';
 
 const DEFAULTS = {
   typescript: 'console.log("Hello, TypeScript!");\n',
@@ -31,6 +32,10 @@ export default function Home() {
   const [visualizedVariables, setVisualizedVariables] = useState<string[]>([]);
   const [ignoredPointers, setIgnoredPointers] = useState<Record<string, string[]>>({});
   const [visualizerPositions, setVisualizerPositions] = useState<Record<string, { x: number, y: number }>>({});
+
+  // Track active project for next/prev folder navigation
+  const [activeProject, setActiveProject] = useState<SavedProject | null>(null);
+  const [folderSiblings, setFolderSiblings] = useState<SavedProject[]>([]);
 
   const { themeMode, setThemeMode, accentColor, setAccentColor, isSettingsOpen, setIsSettingsOpen } = useTheme();
   const layout = useLayout();
@@ -56,6 +61,42 @@ export default function Home() {
     setIgnoredPointers({});
   };
 
+  const handleLoadProject = (p: SavedProject) => {
+    setCode(p.code);
+    setLanguage(p.language as any);
+    setVisualizedVariables(p.visualizedVariables);
+    setIgnoredPointers(p.ignoredPointers);
+    setVisualizerPositions(p.positions || {});
+    exe.setHistory([]);
+    exe.setCurrentStepIndex(0);
+    setActiveProject(p);
+
+    // Load folder siblings for next/prev navigation
+    if (p.folderId) {
+      try {
+        const saved = localStorage.getItem('my-visualizer-projects');
+        if (saved) {
+          const all: SavedProject[] = JSON.parse(saved);
+          const siblings = all.filter(s => s.folderId === p.folderId);
+          setFolderSiblings(siblings);
+        }
+      } catch { setFolderSiblings([]); }
+    } else {
+      setFolderSiblings([]);
+    }
+  };
+
+  const handleNavigateProject = (direction: 'prev' | 'next') => {
+    if (!activeProject || folderSiblings.length === 0) return;
+    const idx = folderSiblings.findIndex(s => s.id === activeProject.id);
+    if (idx === -1) return;
+    const nextIdx = direction === 'next' ? idx + 1 : idx - 1;
+    if (nextIdx < 0 || nextIdx >= folderSiblings.length) return;
+    handleLoadProject(folderSiblings[nextIdx]);
+  };
+
+  const activeIdx = activeProject ? folderSiblings.findIndex(s => s.id === activeProject.id) : -1;
+
   const currentSnapshot = exe.history[exe.currentStepIndex] || { heap: {}, stack: {}, line: 0, description: 'Initialization', stdout: '' };
 
   return (
@@ -64,20 +105,16 @@ export default function Home() {
         onRun={exe.handleRun}
         isCompiling={exe.isCompiling}
         onToggleSettings={() => setIsSettingsOpen(!isSettingsOpen)}
-        onLoadProject={(p) => {
-          setCode(p.code);
-          setLanguage(p.language as any);
-          setVisualizedVariables(p.visualizedVariables);
-          setIgnoredPointers(p.ignoredPointers);
-          setVisualizerPositions(p.positions || {});
-          exe.setHistory([]);
-          exe.setCurrentStepIndex(0);
-        }}
+        onLoadProject={handleLoadProject}
         visualizedVariables={visualizedVariables}
         ignoredPointers={ignoredPointers}
         visualizerPositions={visualizerPositions}
         code={code}
         language={language}
+        activeProject={activeProject}
+        onNavigateProject={handleNavigateProject}
+        hasPrev={activeIdx > 0}
+        hasNext={activeIdx >= 0 && activeIdx < folderSiblings.length - 1}
       />
 
       {isSettingsOpen && (
