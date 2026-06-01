@@ -1,10 +1,12 @@
-# Build context must be the repo root: docker build -f backend/Dockerfile .
+# Build context: backend/ directory
+# lib/ is copied into backend/ so it's available in the Docker context
+
 # Build stage
 FROM maven:3.9-eclipse-temurin-17 AS build
-WORKDIR /app/backend
-COPY backend/pom.xml .
+WORKDIR /app
+COPY pom.xml .
 RUN mvn dependency:go-offline -q
-COPY backend/src ./src
+COPY src ./src
 RUN mvn clean package -DskipTests -q
 
 # Run stage
@@ -19,9 +21,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Spring Boot jar
-COPY --from=build /app/backend/target/codevisualizer-backend-1.0.0.jar app.jar
+COPY --from=build /app/target/codevisualizer-backend-1.0.0.jar app.jar
 
-# Copy tracer scripts from repo root
+# Copy tracer scripts (lib/ is copied into backend/ directory)
 COPY lib/java/ /app/lib/java/
 COPY lib/python/ /app/lib/python/
 COPY lib/c/ /app/lib/c/
