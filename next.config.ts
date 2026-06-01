@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8080";
+// Spring Boot backend URL — hardcoded for production reliability
+// Change this if the backend service URL changes
+const BACKEND_URL = process.env.BACKEND_URL || "https://codevisualizor-api-v2.onrender.com";
 
 const nextConfig: NextConfig = {
   // @ts-ignore
