@@ -9,7 +9,9 @@ services:
     region: singapore
     envVars:
       - key: MONGODB_URI
-        value: mongodb+srv://kirok6719_db_user:zl96NEW10KWHQ41u@codevisualizor.gxwgaf9.mongodb.net/?appName=codevisualizor
+        value: mongodb+srv://kirok6719_db_user:zl96NEW10KWHQ41u@codevisualizor.gxwgaf9.mongodb.net/codevisualizer?appName=codevisualizor
+      - key: MONGODB_DATABASE
+        value: codevisualizer
       - key: JWT_SECRET
         generateValue: true
       - key: FRONTEND_URL
