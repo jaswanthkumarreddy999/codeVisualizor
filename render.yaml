@@ -1,7 +1,7 @@
 services:
   # Spring Boot Backend API
   - type: web
-    name: codevisualizor-api
+    name: codevisualizor-api-v2
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
     dockerContext: .
@@ -17,7 +17,7 @@ services:
       - key: FRONTEND_URL
         value: https://codevisualizor.onrender.com
       - key: BACKEND_URL
-        value: https://codevisualizor-api.onrender.com
+        value: https://codevisualizor-api-v2.onrender.com
       - key: GOOGLE_CLIENT_ID
         value: 671991160931-t8dtnl2nlirqip02fd5od4tl8to43qpu.apps.googleusercontent.com
       - key: GOOGLE_CLIENT_SECRET
@@ -33,4 +33,4 @@ services:
     region: singapore
     envVars:
       - key: BACKEND_URL
-        value: https://codevisualizor-api.onrender.com
+        value: https://codevisualizor-api-v2.onrender.com
