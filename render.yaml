@@ -19,9 +19,9 @@ services:
       - key: BACKEND_URL
         value: https://codevisualizor-api.onrender.com
       - key: GOOGLE_CLIENT_ID
-        sync: false
+        value: 671991160931-t8dtnl2nlirqip02fd5od4tl8to43qpu.apps.googleusercontent.com
       - key: GOOGLE_CLIENT_SECRET
-        sync: false
+        value: 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
 
   # Next.js Frontend
   - type: web
