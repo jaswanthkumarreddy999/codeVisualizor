@@ -7,6 +7,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Data
 @NoArgsConstructor
@@ -16,10 +17,13 @@ public class Program {
     private String id;
     private String title;
     private String code = "";
-    private String language = "java"; // typescript|python|java|c|cpp
-    private String folderId;          // null = root
+    private String language = "java";
+    private String folderId;
+
+    @JsonProperty("isPublic")
     private boolean isPublic = false;
-    private String ownerId;           // null for public programs
+
+    private String ownerId;
     private List<String> visualizedVariables = List.of();
     private Map<String, Object> ignoredPointers = Map.of();
     private Map<String, Object> visualizerPositions = Map.of();

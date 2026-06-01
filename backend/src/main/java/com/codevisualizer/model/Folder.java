@@ -5,6 +5,7 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import java.time.Instant;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Data
 @NoArgsConstructor
@@ -16,8 +17,11 @@ public class Folder {
     private String icon = "Folder";
     private String color = "#10b981";
     private String description = "";
+
+    @JsonProperty("isPublic")
     private boolean isPublic = false;
-    private String ownerId;   // null for public folders
+
+    private String ownerId;
     private int order = 0;
     private Instant createdAt = Instant.now();
 }
