@@ -128,8 +128,8 @@ export const HashMapVisualizer: React.FC<HashMapVisualizerProps> = ({ heap, vari
                     </motion.div>
                 ) : (
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="text-theme-secondary font-mono text-sm border-2 border-dashed border-theme rounded-xl p-8 text-center opacity-50">
-                            Map is empty
+                        <div className="text-theme-secondary font-mono text-sm border-2 border-dashed border-theme rounded-3xl p-12 text-center opacity-50">
+                            HashMap is empty
                         </div>
                     </div>
                 )}

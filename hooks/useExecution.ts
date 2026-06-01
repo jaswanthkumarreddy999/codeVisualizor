@@ -129,21 +129,27 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
             setOutputVal(stdout);
           }
 
-          if (data.history) {
-            const hydrated = hydrateBackendHistory(data.history, code);
-            // Apply line offset: tracer reports lines from the formatted/instrumented file,
-            // but the editor shows the original user code. Subtract the offset to align them.
-            const offset = data.lineOffset || 0;
-            if (offset !== 0) {
-              hydrated.forEach(snap => { snap.line = Math.max(1, snap.line - offset); });
-            }
-            // If there's a runtime error, attach it to the last step's stdout
-            if (errorMsg && hydrated.length > 0) {
-              const last = hydrated[hydrated.length - 1];
-              last.stdout = (last.stdout ? last.stdout + '\n\n' : '') + '⚠ Runtime Error:\n' + errorMsg;
-            }
-            setHistory(hydrated);
-          } else setHistory([]);
+            if (data.history) {
+              const hydrated = hydrateBackendHistory(data.history, code);
+              // Apply line offset: tracer reports lines from the formatted/instrumented file,
+              // but the editor shows the original user code. Subtract the offset to align them.
+              const offset = data.lineOffset || 0;
+              if (offset !== 0) {
+                hydrated.forEach(snap => { snap.line = Math.max(1, snap.line - offset); });
+              }
+              // If there's a runtime error, attach it to the last step's stdout
+              if (errorMsg && hydrated.length > 0) {
+                const last = hydrated[hydrated.length - 1];
+                last.stdout = (last.stdout ? last.stdout + '\n\n' : '') + '⚠ Runtime Error:\n' + errorMsg;
+              }
+
+              // Show warning if 2000 step limit is hit (common for backends)
+              if (hydrated.length >= 2000) {
+                setOutputVal(prev => prev + '\n\n⚠ Execution Limit: Truncated to 2000 steps.');
+              }
+
+              setHistory(hydrated);
+            } else setHistory([]);
         }
       }
       setCurrentStepIndex(0);

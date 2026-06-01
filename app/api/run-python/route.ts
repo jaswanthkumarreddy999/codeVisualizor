@@ -21,14 +21,21 @@ export async function POST(req: Request) {
         await writeFile(filePath, code);
 
         try {
-            // Run python script with tracer and manual Promise to support stdin
-            // Use "python" instead of "python3" for better Windows compatibility, 
-            // and quote paths to handle spaces.
+            // Run python script with tracer and spawn for better control and timeout
             const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+            
             const { stdout, stderr } = await new Promise<{ stdout: string, stderr: string }>((resolve, reject) => {
-                const child = exec(`"${pythonCmd}" "${tracerPath}" "${filePath}"`, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+                const child = exec(`"${pythonCmd}" "${tracerPath}" "${filePath}"`, { 
+                    timeout: 10000, // 10 second timeout
+                    maxBuffer: 1024 * 1024 * 10,
+                    killSignal: 'SIGKILL'
+                }, (error, stdout, stderr) => {
                     if (error) {
-                        reject({ message: error.message, stderr });
+                        if ((error as any).killed || error.signal === 'SIGTERM' || error.signal === 'SIGKILL') {
+                            reject({ message: "Execution timed out (10s limit exceeded).", stderr });
+                        } else {
+                            reject({ message: error.message, stderr });
+                        }
                     } else {
                         resolve({ stdout: stdout as string, stderr: stderr as string });
                     }

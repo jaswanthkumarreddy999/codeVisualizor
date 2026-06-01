@@ -97,6 +97,31 @@ export function useLayout() {
     };
   }, [isResizingEditor, isResizingWatch, isResizingCodeHeight, isResizingInputWidth]);
 
+  // Load initial state from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem('code-visualizer-layout');
+    if (saved) {
+      try {
+        const layout = JSON.parse(saved);
+        if (layout.editorWidth) setEditorWidth(layout.editorWidth);
+        if (layout.watchWindowWidth) setWatchWindowWidth(layout.watchWindowWidth);
+        if (layout.codeEditorHeight) setCodeEditorHeight(layout.codeEditorHeight);
+        if (layout.inputWidth) setInputWidth(layout.inputWidth);
+      } catch (e) {
+        console.error('Failed to load layout from localStorage', e);
+      }
+    }
+  }, []);
+
+  // Save changes to localStorage
+  useEffect(() => {
+     // Only save if not collapsed
+     if (!isSidebarCollapsed && !isWatchCollapsed && !isIOCollapsed) {
+        const layout = { editorWidth, watchWindowWidth, codeEditorHeight, inputWidth };
+        localStorage.setItem('code-visualizer-layout', JSON.stringify(layout));
+     }
+  }, [editorWidth, watchWindowWidth, codeEditorHeight, inputWidth, isSidebarCollapsed, isWatchCollapsed, isIOCollapsed]);
+
   return {
     editorWidth, setEditorWidth,
     watchWindowWidth, setWatchWindowWidth,

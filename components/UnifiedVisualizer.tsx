@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Visualizer } from './Visualizer';
+import { VisualizerErrorBoundary } from './VisualizerErrorBoundary';
 import { motion } from 'framer-motion';
 import { TreeVisualizer } from './TreeVisualizer';
 import { HashMapVisualizer } from './HashMapVisualizer';
@@ -15,6 +15,7 @@ import { HashSetVisualizer } from './HashSetVisualizer';
 
 
 import { PrintAnimator } from './PrintAnimator';
+import { Trash2 } from 'lucide-react';
 
 interface UnifiedVisualizerProps {
     heap: Record<string, any>;
@@ -549,9 +550,10 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
             {visualizedVariables.length > 0 && onClearAll && (
                 <button
                     onClick={(e) => { e.stopPropagation(); onClearAll(); }}
-                    className="absolute top-4 right-4 z-50 bg-theme-tertiary hover:bg-red-500/20 hover:text-red-500 text-theme-secondary border border-theme hover:border-red-500/50 rounded-lg px-3 py-1.5 text-xs font-bold transition-all flex items-center gap-2 shadow-lg backdrop-blur-sm"
+                    className="absolute top-4 right-4 z-50 bg-theme-tertiary/80 hover:bg-red-500/20 hover:text-red-500 text-theme-secondary border border-theme hover:border-red-500/50 rounded-xl px-4 py-2 text-xs font-bold transition-all flex items-center gap-2 shadow-xl backdrop-blur-md active:scale-95 group"
                     title="Clear All Visualizations"
                 >
+                    <Trash2 size={14} className="group-hover:rotate-12 transition-transform" />
                     <span>Clear Canvas</span>
                 </button>
             )}
@@ -678,7 +680,7 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                     } else if (isHashSet) {
                         Content = <HashSetVisualizer heap={heap} variableName={varName} />;
                     } else {
-                        Content = <Visualizer {...commonProps} />;
+                        Content = <PrimitiveVisualizer name={varName} value={value} onRemove={() => onRemoveVariable(varName)} selected={selectedVar === varName} />;
                     }
                     // Add close button for complex wrappers
                     Content = (
@@ -706,6 +708,14 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                         dragElastic={0}
                         dragTransition={{ power: 0, timeConstant: 0 }}
                         initial={false}
+                        animate={{
+                            // Basic positioning and scaling
+                            x: pos.x,
+                            y: pos.y,
+                            // Pulse effect when the variable's value changes
+                            // We use a key-based trigger (the stringified value)
+                            boxShadow: isAnimTarget ? '0 0 40px var(--accent-light)' : (selectedVar === varName ? '0 0 30px var(--accent-light)' : '0 0 0px transparent'),
+                        }}
                         onDragStart={() => setDraggingVar(varName)}
                         onDragEnd={() => { setDraggingVar(null); handleDragEnd(varName); }}
                         whileHover={{ cursor: 'grab', scale: 1.005, transition: { duration: 0.1 } }}
@@ -728,7 +738,9 @@ export const UnifiedVisualizer: React.FC<UnifiedVisualizerProps> = ({
                             pointerEvents: draggingVar === varName ? 'none' : undefined,
                         }}
                     >
-                        {Content}
+                        <VisualizerErrorBoundary name={varName}>
+                            {Content}
+                        </VisualizerErrorBoundary>
 
                         {/* Resize Handle */}
                         {selectedVar === varName && (

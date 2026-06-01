@@ -27,7 +27,6 @@ export function instrument(code: string): string {
                     (path.node as any)._processed = true;
 
                     // Wrap the init expression in a _trace call
-                    // let a = 5  =>  let a = _trace('a', 5, line, 'declaration')
                     const originalInit = path.node.init;
 
                     const traceCall = t.callExpression(t.identifier('_trace'), [
@@ -38,7 +37,50 @@ export function instrument(code: string): string {
                     ]);
 
                     path.node.init = traceCall;
-                    // Do NOT skip, so we can traverse into the init (e.g. function expressions)
+                } else if ((t.isObjectPattern(path.node.id) || t.isArrayPattern(path.node.id)) && path.node.init) {
+                    // Destructuring: const { a, b } = obj
+                    // We can't wrap the init easily, so we inject traces AFTER the declaration
+                    (path.node as any)._processed = true;
+                    const line = path.node.loc?.start.line || 0;
+
+                    // Find all identifiers in the pattern
+                    const ids: string[] = [];
+                    const collectIds = (node: t.Node) => {
+                        if (t.isIdentifier(node)) {
+                            ids.push(node.name);
+                        } else if (t.isObjectPattern(node)) {
+                            node.properties.forEach(p => {
+                                if (t.isObjectProperty(p)) collectIds(p.value);
+                                else if (t.isRestElement(p)) collectIds(p.argument);
+                            });
+                        } else if (t.isArrayPattern(node)) {
+                            node.elements.forEach(el => {
+                                if (el) collectIds(el);
+                            });
+                        } else if (t.isAssignmentPattern(node)) {
+                            collectIds(node.left);
+                        } else if (t.isRestElement(node)) {
+                            collectIds(node.argument);
+                        }
+                    };
+                    collectIds(path.node.id);
+
+                    // If we're in a block, we can insert traces after
+                    const parentDecl = path.parentPath;
+                    if (parentDecl && parentDecl.isVariableDeclaration()) {
+                        ids.forEach(name => {
+                            const traceCall = t.expressionStatement(
+                                t.callExpression(t.identifier('_trace'), [
+                                    t.stringLiteral(name),
+                                    t.identifier(name),
+                                    t.numericLiteral(line),
+                                    t.stringLiteral('assignment'),
+                                ])
+                            );
+                            // We use insertAfter on the VariableDeclaration path
+                            parentDecl.insertAfter(traceCall);
+                        });
+                    }
                 }
             },
 

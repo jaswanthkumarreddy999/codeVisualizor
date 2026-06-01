@@ -6,9 +6,10 @@ import {
     Save, FolderOpen, Trash2, Copy, X, Check, Edit2, Plus, LayoutGrid, Code, Search,
     ArrowLeft, FileCode, Folder, FolderPlus, ChevronRight, ChevronDown, Hash,
     MoveHorizontal, PanelLeft, Layers, Link, GitBranch, Network, Grid3X3, Redo,
-    Home, MoreVertical
+    Home, MoreVertical, RefreshCcw
 } from 'lucide-react';
 import { nanoid } from 'nanoid';
+import { useSession } from 'next-auth/react';
 import { NEETCODE_150_PROJECTS } from '../lib/neetcode150';
 import { ProjectFolder, SavedProject } from '../types/Project';
 
@@ -56,25 +57,25 @@ const FOLDER_COLORS = [
 // ===================== DEFAULT DEMO FOLDERS =====================
 
 const DEFAULT_FOLDERS: ProjectFolder[] = [
-    { id: 'basics', name: 'Java Basics', icon: 'Code', color: '#10b981', description: '50 Basic Problems: IO, Loops, Arrays', order: -1 },
-    { id: 'arrays', name: 'Arrays & Hashing', icon: 'Hash', color: '#10b981', description: 'Two Sum, Contains Duplicate, Group Anagrams', order: 0 },
-    { id: 'two-pointers', name: 'Two Pointers', icon: 'MoveHorizontal', color: '#3b82f6', description: '3Sum, Container with Water, Trapping Rain', order: 1 },
-    { id: 'sliding-window', name: 'Sliding Window', icon: 'PanelLeft', color: '#8b5cf6', description: 'Max Subarray, Longest Substring', order: 2 },
-    { id: 'stack', name: 'Stack', icon: 'Layers', color: '#ef4444', description: 'Valid Parentheses, Min Stack', order: 3 },
-    { id: 'binary-search', name: 'Binary Search', icon: 'Search', color: '#f59e0b', description: 'Search Rotated, Find Min, Median Arrays', order: 4 },
-    { id: 'linked-list', name: 'Linked List', icon: 'Link', color: '#ec4899', description: 'Reverse, Merge, Cycle Detection', order: 5 },
-    { id: 'trees', name: 'Trees', icon: 'GitBranch', color: '#06b6d4', description: 'Traversals, BST, LCA', order: 6 },
-    { id: 'tries', name: 'Tries', icon: 'Network', color: '#84cc16', description: 'Implement Trie, Word Dictionary', order: 7 },
-    { id: 'heap', name: 'Heap / Priority Queue', icon: 'Grid3X3', color: '#14b8a6', description: 'Kth Largest, Task Scheduler', order: 8 },
-    { id: 'backtracking', name: 'Backtracking', icon: 'Redo', color: '#f97316', description: 'Permutations, N-Queens, Subsets', order: 9 },
-    { id: 'graphs', name: 'Graphs', icon: 'Network', color: '#84cc16', description: 'BFS, DFS, Dijkstra, Topo Sort', order: 10 },
-    { id: 'advanced-graphs', name: 'Advanced Graphs', icon: 'Network', color: '#84cc16', description: 'Swim in Rising Water, Alien Dictionary', order: 11 },
-    { id: '1d-dp', name: '1-D DP', icon: 'Grid3X3', color: '#a855f7', description: 'Climbing Stairs, House Robber', order: 12 },
-    { id: '2d-dp', name: '2-D DP', icon: 'Grid3X3', color: '#a855f7', description: 'LCS, Edit Distance', order: 13 },
-    { id: 'greedy', name: 'Greedy', icon: 'Code', color: '#eab308', description: 'Jump Game, Gas Station', order: 14 },
-    { id: 'intervals', name: 'Intervals', icon: 'PanelLeft', color: '#6366f1', description: 'Merge Intervals, Meeting Rooms', order: 15 },
-    { id: 'math', name: 'Math & Geometry', icon: 'Code', color: '#f43f5e', description: 'Rotate Image, Spiral Matrix', order: 16 },
-    { id: 'bit-manipulation', name: 'Bit Manipulation', icon: 'Code', color: '#6b7280', description: 'Single Number, Reverse Bits', order: 17 },
+    { id: 'basics', name: 'Java Basics', icon: 'Code', color: '#10b981', description: '50 Basic Problems: IO, Loops, Arrays', order: -1, isPublic: true },
+    { id: 'arrays', name: 'Arrays & Hashing', icon: 'Hash', color: '#10b981', description: 'Two Sum, Contains Duplicate, Group Anagrams', order: 0, isPublic: true },
+    { id: 'two-pointers', name: 'Two Pointers', icon: 'MoveHorizontal', color: '#3b82f6', description: '3Sum, Container with Water, Trapping Rain', order: 1, isPublic: true },
+    { id: 'sliding-window', name: 'Sliding Window', icon: 'PanelLeft', color: '#8b5cf6', description: 'Max Subarray, Longest Substring', order: 2, isPublic: true },
+    { id: 'stack', name: 'Stack', icon: 'Layers', color: '#ef4444', description: 'Valid Parentheses, Min Stack', order: 3, isPublic: true },
+    { id: 'binary-search', name: 'Binary Search', icon: 'Search', color: '#f59e0b', description: 'Search Rotated, Find Min, Median Arrays', order: 4, isPublic: true },
+    { id: 'linked-list', name: 'Linked List', icon: 'Link', color: '#ec4899', description: 'Reverse, Merge, Cycle Detection', order: 5, isPublic: true },
+    { id: 'trees', name: 'Trees', icon: 'GitBranch', color: '#06b6d4', description: 'Traversals, BST, LCA', order: 6, isPublic: true },
+    { id: 'tries', name: 'Tries', icon: 'Network', color: '#84cc16', description: 'Implement Trie, Word Dictionary', order: 7, isPublic: true },
+    { id: 'heap', name: 'Heap / Priority Queue', icon: 'Grid3X3', color: '#14b8a6', description: 'Kth Largest, Task Scheduler', order: 8, isPublic: true },
+    { id: 'backtracking', name: 'Backtracking', icon: 'Redo', color: '#f97316', description: 'Permutations, N-Queens, Subsets', order: 9, isPublic: true },
+    { id: 'graphs', name: 'Graphs', icon: 'Network', color: '#84cc16', description: 'BFS, DFS, Dijkstra, Topo Sort', order: 10, isPublic: true },
+    { id: 'advanced-graphs', name: 'Advanced Graphs', icon: 'Network', color: '#84cc16', description: 'Swim in Rising Water, Alien Dictionary', order: 11, isPublic: true },
+    { id: '1d-dp', name: '1-D DP', icon: 'Grid3X3', color: '#a855f7', description: 'Climbing Stairs, House Robber', order: 12, isPublic: true },
+    { id: '2d-dp', name: '2-D DP', icon: 'Grid3X3', color: '#a855f7', description: 'LCS, Edit Distance', order: 13, isPublic: true },
+    { id: 'greedy', name: 'Greedy', icon: 'Code', color: '#eab308', description: 'Jump Game, Gas Station', order: 14, isPublic: true },
+    { id: 'intervals', name: 'Intervals', icon: 'PanelLeft', color: '#6366f1', description: 'Merge Intervals, Meeting Rooms', order: 15, isPublic: true },
+    { id: 'math', name: 'Math & Geometry', icon: 'Code', color: '#f43f5e', description: 'Rotate Image, Spiral Matrix', order: 16, isPublic: true },
+    { id: 'bit-manipulation', name: 'Bit Manipulation', icon: 'Code', color: '#6b7280', description: 'Single Number, Reverse Bits', order: 17, isPublic: true },
 ];
 
 // ===================== COMPONENT =====================
@@ -101,6 +102,8 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     const [savingToFolderId, setSavingToFolderId] = useState<string | null>(null);
     const [mounted, setMounted] = useState(false);
     const [sidebarCollapsed, setSidebarCollapsed] = useState<Record<string, boolean>>({});
+    const { data: session } = useSession();
+    const [isSyncing, setIsSyncing] = useState(false);
 
     // Drag and Drop state
     const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
@@ -113,58 +116,70 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
         setMounted(true);
     }, []);
 
-    // Load from localStorage and Seed Data
+    // Load from API or localStorage
     useEffect(() => {
-        if (isOpen) {
-            const savedProjects = localStorage.getItem('my-visualizer-projects');
-            const savedFolders = localStorage.getItem('my-visualizer-folders');
-            const hasImportedNeetcodeV6 = localStorage.getItem('neetcode-imported-v8');
+        if (!isOpen) return;
 
-            let currentProjects: SavedProject[] = [];
-            let currentFolders: ProjectFolder[] = [];
+        const fetchData = async () => {
+            setIsSyncing(true);
+            try {
+                    // Helper to merge public and private projects
+                    const mergeProjects = (userProjs: SavedProject[]) => {
+                        const projectMap = new Map<string, SavedProject>();
+                        // Add public projects first
+                        NEETCODE_150_PROJECTS.forEach(p => projectMap.set(p.id, { ...p, isPublic: true }));
+                        // Overwrite with user versions
+                        userProjs.forEach(p => {
+                            const isPublicId = NEETCODE_150_PROJECTS.some(n => n.id === p.id);
+                            if (isPublicId) {
+                                projectMap.set(p.id, { ...p, isPublic: true, isModified: true });
+                            } else {
+                                projectMap.set(p.id, p);
+                            }
+                        });
+                        return Array.from(projectMap.values());
+                    };
 
-            if (savedProjects) {
-                try { currentProjects = JSON.parse(savedProjects); } catch (e) { console.error(e); }
+                    if (session) {
+                        // Fetch from Database
+                        const [projsRes, foldersRes] = await Promise.all([
+                            fetch('/api/user/programs'),
+                            fetch('/api/user/folders')
+                        ]);
+                        
+                        if (projsRes.ok && foldersRes.ok) {
+                            const dbProjects = await projsRes.json();
+                            const dbFolders = await foldersRes.json();
+                            setProjects(mergeProjects(dbProjects));
+                            setFolders([...dbFolders, ...DEFAULT_FOLDERS]);
+                        }
+                    } else {
+                        // Fallback to LocalStorage for Guests
+                        const savedProjects = localStorage.getItem('my-visualizer-projects');
+                        const savedFolders = localStorage.getItem('my-visualizer-folders');
+                        
+                        let currentProjects: SavedProject[] = [];
+                        let currentFolders: ProjectFolder[] = [];
+
+                        if (savedProjects) {
+                            try { currentProjects = JSON.parse(savedProjects); } catch (e) { console.error(e); }
+                        }
+                        if (savedFolders) {
+                            try { currentFolders = JSON.parse(savedFolders); } catch (e) { console.error(e); }
+                        }
+
+                        setProjects(mergeProjects(currentProjects));
+                        setFolders([...currentFolders, ...DEFAULT_FOLDERS]);
+                    }
+            } catch (error) {
+                console.error("Failed to fetch projects:", error);
+            } finally {
+                setIsSyncing(false);
             }
+        };
 
-            if (savedFolders) {
-                try { currentFolders = JSON.parse(savedFolders); } catch (e) { console.error(e); }
-            }
-
-            // Seed NeetCode 150 (Split Version) and Basics
-            if (!hasImportedNeetcodeV6) {
-                console.log("Seeding NeetCode 150 & Basics Projects (v7)...");
-
-                // Remove old NeetCode projects to avoid duplicates
-                currentProjects = currentProjects.filter(p => !p.id.startsWith('nc150-'));
-
-                // Add new projects
-                currentProjects = [...currentProjects, ...NEETCODE_150_PROJECTS];
-
-                // Force update folders to ensure all categories exist (including new Basics)
-                // Merge with existing folders if user created custom ones?
-                // For simplicity, we'll re-add default folders if they are missing.
-                // But replacing currentFolders = DEFAULT_FOLDERS wipes custom folders.
-                // Better approach: Merge defaults into current.
-
-                const existingFolderIds = new Set(currentFolders.map(f => f.id));
-                const missingDefaults = DEFAULT_FOLDERS.filter(f => !existingFolderIds.has(f.id));
-                currentFolders = [...currentFolders, ...missingDefaults];
-
-                // Save to storage
-                localStorage.setItem('my-visualizer-projects', JSON.stringify(currentProjects));
-                localStorage.setItem('my-visualizer-folders', JSON.stringify(currentFolders));
-                localStorage.setItem('neetcode-imported-v8', 'true'); // New flag
-            } else if (!savedFolders) {
-                // Initialize default folders if just starting out but flag somehow set (unlikely) or normal init
-                currentFolders = DEFAULT_FOLDERS;
-                localStorage.setItem('my-visualizer-folders', JSON.stringify(currentFolders));
-            }
-
-            setProjects(currentProjects);
-            setFolders(currentFolders);
-        }
-    }, [isOpen]);
+        fetchData();
+    }, [isOpen, session]);
 
     const saveProjectsToStorage = (newProjects: SavedProject[]) => {
         localStorage.setItem('my-visualizer-projects', JSON.stringify(newProjects));
@@ -178,36 +193,126 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
     // ===================== PROJECT CRUD =====================
 
-    const handleSaveNew = () => {
+    const handleSaveNew = async () => {
         if (!newProjectName.trim()) return;
 
-        const newProject: SavedProject = {
-            id: nanoid(),
+        const projectData = {
             name: newProjectName.trim(),
-            lastModified: Date.now(),
             code: currentCode,
             language: currentLanguage,
             visualizedVariables: currentVisualizedVars,
             ignoredPointers: currentIgnoredPointers,
-            positions: currentPositions,
+            visualizerPositions: currentPositions,
+            folderId: savingToFolderId || currentFolderId || null,
         };
 
-        const updatedProjects = [newProject, ...projects];
-        saveProjectsToStorage(updatedProjects);
-        setActiveProjectId(newProject.id);
+        if (session) {
+            try {
+                const res = await fetch('/api/user/programs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(projectData),
+                });
+                if (res.ok) {
+                    const saved = await res.json();
+                    setProjects([saved, ...projects]);
+                    setActiveProjectId(saved._id || saved.id);
+                }
+            } catch (e) { console.error(e); }
+        } else {
+            const newProject: SavedProject = {
+                id: nanoid(),
+                ...projectData,
+                lastModified: Date.now(),
+                positions: currentPositions,
+            };
+            const updatedProjects = [newProject, ...projects];
+            saveProjectsToStorage(updatedProjects);
+            setActiveProjectId(newProject.id);
+        }
+
         setView(currentFolderId ? 'folder-contents' : 'folders');
         setNewProjectName('');
         setSavingToFolderId(null);
     };
 
-    const handleOverwrite = (id: string, e?: React.MouseEvent) => {
+    const handleResetToDefault = async (project: SavedProject, e: React.MouseEvent) => {
+        e.stopPropagation();
+        const original = NEETCODE_150_PROJECTS.find(p => p.id === project.id);
+        if (original && confirm('Reset this problem to its original state? Your changes will be lost.')) {
+            if (session && (project as any).isModified) {
+                try {
+                    const res = await fetch(`/api/user/programs/${project._id || project.id}`, { method: 'DELETE' });
+                    if (res.ok) {
+                        setProjects(projects.map(p => p.id === project.id ? { ...original, isPublic: true } : p));
+                    }
+                } catch (e) { console.error(e); }
+            } else {
+                const updatedProjects = projects.map(p => p.id === project.id ? { ...original, isPublic: true } : p);
+                setProjects(updatedProjects);
+                // Clean up localStorage for guests
+                const savedProjects = localStorage.getItem('my-visualizer-projects');
+                if (savedProjects) {
+                    const localOnly = JSON.parse(savedProjects).filter((p: any) => p.id !== project.id);
+                    localStorage.setItem('my-visualizer-projects', JSON.stringify(localOnly));
+                }
+            }
+            onLoadProject(original);
+            setIsOpen(false);
+        }
+    };
+
+    const handleOverwrite = async (id: string, e?: React.MouseEvent) => {
         e?.stopPropagation();
-        const updatedProjects = projects.map(p =>
-            p.id === id
-                ? { ...p, code: currentCode, language: currentLanguage, visualizedVariables: currentVisualizedVars, ignoredPointers: currentIgnoredPointers, positions: currentPositions, updatedAt: Date.now() }
-                : p
-        );
-        saveProjectsToStorage(updatedProjects);
+        
+        const project = projects.find(p => p.id === id || (p as any)._id === id);
+        
+        // If it's a public project and NOT yet saved to user account, we "Force Save" it with same ID
+        const isPublicId = NEETCODE_150_PROJECTS.some(n => n.id === id);
+
+        const projectData: Partial<SavedProject> & { id?: string } = {
+            id: isPublicId ? id : undefined, // Preserve ID for public overrides
+            name: project?.name,
+            code: currentCode,
+            language: currentLanguage,
+            visualizedVariables: currentVisualizedVars ?? [],
+            ignoredPointers: currentIgnoredPointers ?? {},
+            visualizerPositions: currentPositions,
+            folderId: project?.folderId,
+        };
+
+        if (session) {
+            try {
+                // If it's a public override, we might need POST if it doesn't exist in DB yet
+                const isModified = project?.isModified;
+                const method = isModified ? 'PUT' : 'POST';
+                const url = isModified ? `/api/user/programs/${id}` : '/api/user/programs';
+
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(projectData),
+                });
+                if (res.ok) {
+                    const updated: SavedProject = await res.json();
+                    if (method === 'POST') {
+                        setProjects(projects.map(p => p.id === id ? { ...updated, isPublic: true, isModified: true } : p));
+                    } else {
+                        setProjects(projects.map(p => (p.id === id || (p as any)._id === id) ? { ...updated, isPublic: true, isModified: true } : p));
+                    }
+                }
+            } catch (e) { console.error(e); }
+        } else {
+            const updatedProjects = projects.map(p =>
+                p.id === id
+                    ? { ...p, ...projectData, lastModified: Date.now(), positions: currentPositions, isModified: true } as SavedProject
+                    : p
+            );
+            // Also update localStorage specifically with only non-static projects
+            const localOnly = updatedProjects.filter(p => !NEETCODE_150_PROJECTS.some(n => n.id === p.id) || p.isModified);
+            localStorage.setItem('my-visualizer-projects', JSON.stringify(localOnly));
+            setProjects(updatedProjects);
+        }
         setActiveProjectId(id);
     };
 
@@ -320,11 +425,10 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
     // ===================== FOLDER CRUD =====================
 
-    const handleCreateFolder = () => {
+    const handleCreateFolder = async () => {
         if (!newFolderName.trim()) return;
 
-        const newFolder: ProjectFolder = {
-            id: nanoid(),
+        const folderData = {
             name: newFolderName.trim(),
             icon: newFolderIcon,
             color: newFolderColor,
@@ -332,25 +436,49 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
             order: folders.length
         };
 
-        saveFoldersToStorage([...folders, newFolder]);
+        if (session) {
+            try {
+                const res = await fetch('/api/user/folders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(folderData),
+                });
+                if (res.ok) {
+                    const saved = await res.json();
+                    setFolders([...folders, saved]);
+                }
+            } catch (e) { console.error(e); }
+        } else {
+            const newFolder: ProjectFolder = {
+                id: nanoid(),
+                ...folderData
+            };
+            saveFoldersToStorage([...folders, newFolder]);
+        }
+
         setNewFolderName('');
-        setNewFolderIcon('Folder');
-        setNewFolderColor(FOLDER_COLORS[0]);
         setView('folders');
     };
 
-    const handleDeleteFolder = (folderId: string, e: React.MouseEvent) => {
+    const handleDeleteFolder = async (folderId: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (confirm('Delete this folder? Projects inside will be moved to root.')) {
-            // Move projects to root
-            const updatedProjects = projects.map(p =>
-                p.folderId === folderId ? { ...p, folderId: undefined } : p
-            );
-            saveProjectsToStorage(updatedProjects);
-
-            // Delete folder
-            const updatedFolders = folders.filter(f => f.id !== folderId);
-            saveFoldersToStorage(updatedFolders);
+            if (session) {
+                try {
+                    const res = await fetch(`/api/user/folders/${folderId}`, { method: 'DELETE' });
+                    if (res.ok) {
+                        setFolders(folders.filter(f => (f.id === folderId || f._id === folderId)));
+                        setProjects(projects.map(p => p.folderId === folderId ? { ...p, folderId: null } : p));
+                    }
+                } catch (e) { console.error(e); }
+            } else {
+                const updatedProjects = projects.map(p =>
+                    p.folderId === folderId ? { ...p, folderId: null } : p
+                );
+                saveProjectsToStorage(updatedProjects);
+                const updatedFolders = folders.filter(f => f.id !== folderId);
+                saveFoldersToStorage(updatedFolders);
+            }
 
             if (currentFolderId === folderId) {
                 setCurrentFolderId(null);
@@ -431,20 +559,24 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                         <IconComponent size={24} />
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                            onClick={(e) => handleRenameFolder(folder.id, folder.name, e)}
-                            className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary rounded-lg transition-colors"
-                            title="Rename"
-                        >
-                            <Edit2 size={14} />
-                        </button>
-                        <button
-                            onClick={(e) => handleDeleteFolder(folder.id, e)}
-                            className="p-1.5 text-theme-secondary hover:text-red-400 hover:bg-theme-tertiary rounded-lg transition-colors"
-                            title="Delete"
-                        >
-                            <Trash2 size={14} />
-                        </button>
+                        {!folder.isPublic && (
+                            <>
+                                <button
+                                    onClick={(e) => handleRenameFolder(folder.id, folder.name, e)}
+                                    className="p-1.5 text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary rounded-lg transition-colors"
+                                    title="Rename"
+                                >
+                                    <Edit2 size={14} />
+                                </button>
+                                <button
+                                    onClick={(e) => handleDeleteFolder(folder.id, e)}
+                                    className="p-1.5 text-theme-secondary hover:text-red-400 hover:bg-theme-tertiary rounded-lg transition-colors"
+                                    title="Delete"
+                                >
+                                    <Trash2 size={14} />
+                                </button>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -476,8 +608,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     <div className="w-10 h-10 rounded-lg bg-theme-tertiary flex items-center justify-center group-hover:bg-accent/20 group-hover:text-accent transition-colors text-theme-secondary">
                         <Code size={20} />
                     </div>
-                    {activeProjectId === project.id && (
-                        <span className="text-[10px] font-bold bg-accent text-white px-2 py-1 rounded-full">ACTIVE</span>
+                    {activeProjectId === (project._id || project.id) && (
+                        <span className="text-[10px] font-bold bg-accent text-white px-2 py-1 rounded-full uppercase">Active</span>
+                    )}
+                    {project.isPublic && (
+                        <span className="text-[10px] font-bold bg-blue-500/20 text-blue-400 px-2 py-1 rounded-full uppercase mr-2">Public</span>
                     )}
                 </div>
 
@@ -493,34 +628,56 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     >
                         Load
                     </button>
+                    {(project.isPublic || (project as any).isModified) && (
+                        <button
+                            onClick={(e) => handleResetToDefault(project, e)}
+                            className={`p-2 rounded-lg transition-colors ${(project as any).isModified ? 'text-orange-400 hover:bg-orange-400/10' : 'text-theme-secondary hover:text-blue-400 hover:bg-theme-tertiary'}`}
+                            title="Reset to Default"
+                        >
+                            <RefreshCcw size={18} />
+                        </button>
+                    )}
                     <button
-                        onClick={(e) => handleOverwrite(project.id, e)}
+                        onClick={(e) => handleOverwrite(project._id || project.id, e)}
                         className="p-2 text-theme-secondary hover:text-accent hover:bg-theme-tertiary rounded-lg transition-colors"
-                        title="Overwrite"
+                        title={project.isPublic ? "Save to my Account" : "Overwrite"}
                     >
                         <Save size={18} />
                     </button>
-                    <button
-                        onClick={(e) => handleRename(project.id, project.name, e)}
-                        className="p-2 text-theme-secondary hover:text-accent hover:bg-theme-tertiary rounded-lg transition-colors"
-                        title="Rename"
-                    >
-                        <Edit2 size={18} />
-                    </button>
-                    <button
-                        onClick={(e) => handleDuplicate(project, e)}
-                        className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary rounded-lg transition-colors"
-                        title="Duplicate"
-                    >
-                        <Copy size={18} />
-                    </button>
-                    <button
-                        onClick={(e) => handleDelete(project.id, e)}
-                        className="p-2 text-theme-secondary hover:text-red-400 hover:bg-theme-tertiary rounded-lg transition-colors"
-                        title="Delete"
-                    >
-                        <Trash2 size={18} />
-                    </button>
+                    {!project.isPublic && (
+                        <>
+                            <button
+                                onClick={(e) => handleRename(project._id || project.id, project.name, e)}
+                                className="p-2 text-theme-secondary hover:text-accent hover:bg-theme-tertiary rounded-lg transition-colors"
+                                title="Rename"
+                            >
+                                <Edit2 size={18} />
+                            </button>
+                            <button
+                                onClick={(e) => handleDuplicate(project, e)}
+                                className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary rounded-lg transition-colors"
+                                title="Duplicate"
+                            >
+                                <Copy size={18} />
+                            </button>
+                            <button
+                                onClick={(e) => handleDelete(project._id || project.id, e)}
+                                className="p-2 text-theme-secondary hover:text-red-400 hover:bg-theme-tertiary rounded-lg transition-colors"
+                                title="Delete"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        </>
+                    )}
+                    {project.isPublic && (
+                         <button
+                            onClick={(e) => handleDuplicate(project, e)}
+                            className="p-2 text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary rounded-lg transition-colors"
+                            title="Fork & Clone"
+                        >
+                            <Copy size={18} />
+                        </button>
+                    )}
                 </div>
             </div>
         );
