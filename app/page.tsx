@@ -34,6 +34,11 @@ export default function VisualizerPage() {
   const [ignoredPointers, setIgnoredPointers] = useState<Record<string, string[]>>({});
   const [visualizerPositions, setVisualizerPositions] = useState<Record<string, { x: number, y: number }>>({});
 
+  // Silently wake up Spring Boot backend on page load so it's ready when user clicks Run
+  useEffect(() => {
+    fetch('/api/public/folders', { method: 'GET' }).catch(() => {});
+  }, []);
+
   // Track active project for next/prev folder navigation
   const [activeProject, setActiveProject] = useState<SavedProject | null>(null);
   const [folderSiblings, setFolderSiblings] = useState<SavedProject[]>([]);

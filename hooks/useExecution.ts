@@ -36,6 +36,11 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code, input: inputVal })
         });
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          setOutputVal('⏳ Server is starting up (free tier cold start ~60s).\nPlease wait a moment and click Run again.');
+          return;
+        }
         const data = await res.json();
         if (data.error) {
           setOutputVal(`Error: ${data.error}\n${data.stderr || ''}`);
@@ -53,6 +58,19 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code, input: inputVal })
         });
+
+        // Check if response is HTML (backend cold start / 502)
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          if (res.status === 502 || res.status === 503) {
+            setOutputVal('⏳ Server is starting up (free tier cold start ~60s).\nPlease wait a moment and click Run again.');
+          } else {
+            setOutputVal(`⚠ Server error (${res.status}). Please try again.`);
+          }
+          setHistory([]);
+          return;
+        }
+
         const data = await res.json();
         if (data.error) {
           // Parse javac stderr into clean, concise error messages
