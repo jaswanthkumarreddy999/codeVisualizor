@@ -1,12 +1,23 @@
 'use client';
 
 import React, { useState } from 'react';
-import { LogIn, LogOut, User, ChevronDown } from 'lucide-react';
+import { LogIn, LogOut, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 export const AuthButton: React.FC = () => {
-  const { user, loading, isLoggedIn, signIn, signOut } = useAuth();
+  const { user, loading, isLoggedIn, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+
+  const handleSignIn = async () => {
+    setSigningIn(true);
+    try {
+      // Wake up the Spring Boot backend first (free tier cold start ~60s)
+      await fetch('/api/public/folders', { method: 'GET' }).catch(() => {});
+    } finally {
+      window.location.href = '/oauth2/authorization/google';
+    }
+  };
 
   if (loading) {
     return <div className="w-8 h-8 rounded-full bg-theme-tertiary animate-pulse" />;
@@ -15,12 +26,22 @@ export const AuthButton: React.FC = () => {
   if (!isLoggedIn) {
     return (
       <button
-        onClick={signIn}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold text-theme-secondary hover:bg-theme-tertiary hover:text-theme-primary transition-colors border border-theme"
+        onClick={handleSignIn}
+        disabled={signingIn}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-bold text-theme-secondary hover:bg-theme-tertiary hover:text-theme-primary transition-colors border border-theme disabled:opacity-60 disabled:cursor-wait"
         title="Sign in with Google"
       >
-        <LogIn size={15} />
-        <span className="hidden sm:inline">Sign In</span>
+        {signingIn ? (
+          <>
+            <div className="w-3 h-3 border-2 border-theme-secondary border-t-accent rounded-full animate-spin" />
+            <span className="hidden sm:inline">Connecting...</span>
+          </>
+        ) : (
+          <>
+            <LogIn size={15} />
+            <span className="hidden sm:inline">Sign In</span>
+          </>
+        )}
       </button>
     );
   }

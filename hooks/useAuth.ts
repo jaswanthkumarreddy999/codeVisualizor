@@ -41,8 +41,15 @@ export function useAuth() {
   }, [loadFromStorage]);
 
   const signIn = () => {
-    // Redirect to Spring Boot Google OAuth
-    window.location.href = '/oauth2/authorization/google';
+    // Wake up the Spring Boot backend first (free tier cold start),
+    // then redirect to Google OAuth
+    const btn = document.querySelector('[data-signin-btn]') as HTMLButtonElement | null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Connecting...'; }
+
+    fetch('/api/public/folders', { method: 'GET' })
+      .finally(() => {
+        window.location.href = '/oauth2/authorization/google';
+      });
   };
 
   const signOut = async () => {
