@@ -38,7 +38,13 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
         });
         const contentType = res.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
-          setOutputVal('⏳ Server is starting up (free tier cold start ~60s).\nPlease wait a moment and click Run again.');
+          if (res.status === 502 || res.status === 503) {
+            // Auto-retry for Python too
+            setOutputVal('⏳ Server warming up, retrying automatically...');
+            await new Promise(r => setTimeout(r, 5000));
+            return handleRun();
+          }
+          setOutputVal('⚠ Server error. Please try again.');
           return;
         }
         const data = await res.json();
@@ -53,20 +59,52 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
           : language === 'c' ? '/api/run-c'
             : '/api/run-cpp';
 
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code, input: inputVal })
-        });
+        // Helper: run with automatic retry on 502 (backend cold start)
+        const runWithRetry = async (): Promise<Response> => {
+          const MAX_WAIT_MS = 120000; // 2 minutes max
+          const RETRY_INTERVAL = 5000; // retry every 5 seconds
+          const startTime = Date.now();
+          let attempt = 0;
 
-        // Check if response is HTML (backend cold start / 502)
+          while (true) {
+            attempt++;
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code, input: inputVal })
+            });
+
+            const contentType = res.headers.get('content-type') || '';
+            const isHtml = !contentType.includes('application/json');
+            const isRetryable = isHtml && (res.status === 502 || res.status === 503 || res.status === 504);
+
+            if (!isRetryable) return res;
+
+            const elapsed = Date.now() - startTime;
+            if (elapsed + RETRY_INTERVAL > MAX_WAIT_MS) {
+              // Give up
+              setOutputVal('⚠ Backend did not respond after 2 minutes. Please try again later.');
+              setHistory([]);
+              throw new Error('timeout');
+            }
+
+            const remaining = Math.ceil((MAX_WAIT_MS - elapsed) / 1000);
+            setOutputVal(`⏳ Server warming up... retrying in 5s (${remaining}s remaining)`);
+            await new Promise(r => setTimeout(r, RETRY_INTERVAL));
+          }
+        };
+
+        let res: Response;
+        try {
+          res = await runWithRetry();
+        } catch {
+          return;
+        }
+
+        // Check if response is still HTML after retries
         const contentType = res.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
-          if (res.status === 502 || res.status === 503) {
-            setOutputVal('⏳ Server is starting up (free tier cold start ~60s).\nPlease wait a moment and click Run again.');
-          } else {
-            setOutputVal(`⚠ Server error (${res.status}). Please try again.`);
-          }
+          setOutputVal(`⚠ Server error (${res.status}). Please try again.`);
           setHistory([]);
           return;
         }
