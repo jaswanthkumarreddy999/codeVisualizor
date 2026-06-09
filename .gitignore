@@ -13,3 +13,4 @@ server/*.jar
 .DS_Store
 *.log
 .kiro/
+node_modules/
