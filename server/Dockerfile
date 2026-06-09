@@ -38,4 +38,4 @@ ENV TRACER_GDB_PATH=/app/lib/c/gdb_tracer.py
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "--add-modules", "jdk.jdi", "-jar", "app.jar"]
+ENTRYPOINT ["sh", "-c", "java --add-modules jdk.jdi -jar app.jar --server.port=${PORT:-8080}"]

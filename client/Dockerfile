@@ -15,4 +15,5 @@ RUN npm run build
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+# Render injects PORT env var — Next.js must bind to it
+CMD ["sh", "-c", "npx next start -p ${PORT:-3000}"]
