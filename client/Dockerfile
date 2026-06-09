@@ -6,11 +6,10 @@ RUN npm ci
 
 FROM node:20-slim AS builder
 WORKDIR /app
-# Copy installed deps from previous stage
+# Force cache invalidation — bump this number to force a clean rebuild
+ARG CACHE_BUST=2
 COPY --from=deps /app/node_modules ./node_modules
-# Copy source (no .next, no node_modules — see .dockerignore)
 COPY . .
-# Always do a fresh build — no stale .next cache possible
 RUN npm run build
 
 FROM node:20-slim AS runner
