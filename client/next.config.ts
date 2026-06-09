@@ -1,9 +1,15 @@
 import type { NextConfig } from "next";
 
 // Spring Boot backend URL — hardcoded for production reliability
+// NOTE: This is a build-time value baked into the Next.js bundle.
+// BACKEND_URL env var must be set BEFORE the Docker build, not at runtime.
 const BACKEND_URL = process.env.BACKEND_URL || "https://codevisualizor-api-v2.onrender.com";
 
 const nextConfig: NextConfig = {
+  // Expose BACKEND_URL to the build so rewrites work correctly
+  env: {
+    BACKEND_URL,
+  },
   // @ts-ignore
   allowedDevOrigins: ["localhost:3000", "127.0.0.1:3000"],
 

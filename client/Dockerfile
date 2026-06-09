@@ -7,6 +7,9 @@ RUN npm ci
 
 FROM node:20-slim AS builder
 WORKDIR /app
+# Pass BACKEND_URL at build time so Next.js proxy rewrites are baked in correctly
+ARG BACKEND_URL=https://codevisualizor-api-v2.onrender.com
+ENV BACKEND_URL=$BACKEND_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
