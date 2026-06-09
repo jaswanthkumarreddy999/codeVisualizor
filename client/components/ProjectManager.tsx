@@ -115,6 +115,11 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
 
     useEffect(() => {
         setMounted(true);
+        // Clear stale folder cache from localStorage — folders are always derived from
+        // DEFAULT_FOLDERS + DB, so cached localStorage folders only cause duplicates
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('my-visualizer-folders');
+        }
     }, []);
 
     // Load from API or localStorage
