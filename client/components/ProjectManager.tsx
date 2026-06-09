@@ -120,6 +120,9 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
     // Load from API or localStorage
     useEffect(() => {
         if (!isOpen) return;
+        // Don't run until auth state is resolved — prevents double-fire
+        // (once as guest, once as logged-in) which causes duplicate folders
+        if (typeof window !== 'undefined' && localStorage.getItem('auth_token') && !isLoggedIn) return;
 
         const fetchData = async () => {
             setIsSyncing(true);
@@ -173,20 +176,16 @@ export const ProjectManager: React.FC<ProjectManagerProps> = ({
                     } else {
                         // Fallback to LocalStorage for Guests
                         const savedProjects = localStorage.getItem('my-visualizer-projects');
-                        const savedFolders = localStorage.getItem('my-visualizer-folders');
-                        
+                        // Don't load saved folders from localStorage — always use DEFAULT_FOLDERS as base
+                        // (stale localStorage folders with MongoDB IDs cause duplicates when merged)
                         let currentProjects: SavedProject[] = [];
-                        let currentFolders: ProjectFolder[] = [];
 
                         if (savedProjects) {
                             try { currentProjects = JSON.parse(savedProjects); } catch (e) { console.error(e); }
                         }
-                        if (savedFolders) {
-                            try { currentFolders = JSON.parse(savedFolders); } catch (e) { console.error(e); }
-                        }
 
                         setProjects(mergeProjects(currentProjects));
-                        setFolders(mergeFolders(currentFolders));
+                        setFolders(mergeFolders([]));
                     }
             } catch (error) {
                 console.error("Failed to fetch projects:", error);
