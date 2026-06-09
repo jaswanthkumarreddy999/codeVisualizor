@@ -10,7 +10,8 @@ RUN npm ci
 # Copy source
 COPY . .
 
-# Build Next.js app
+# Build Next.js app — cache bust via build arg
+ARG CACHEBUST=1
 RUN npm run build
 
 EXPOSE 3000
