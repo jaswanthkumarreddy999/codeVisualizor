@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+html {
+  scroll-behavior: smooth;
+}
+
+:root {
+  /* Default Dark Theme (can be toggled to light via JS class) */
+  --bg-primary: #020617;
+  /* slate-950 */
+  --bg-secondary: #0f172a;
+  /* slate-900 */
+  --bg-tertiary: #1e293b;
+  /* slate-800 */
+
+  --text-primary: #f8fafc;
+  /* slate-50 */
+  --text-secondary: #94a3b8;
+  /* slate-400 */
+
+  --border: #1e293b;
+  /* slate-800 */
+
+  --accent: #4f46e5;
+  /* indigo-600 */
+  --accent-hover: #4338ca;
+  /* indigo-700 */
+  --accent-light: rgba(79, 70, 229, 0.2);
+
+  --background: var(--bg-primary);
+  --foreground: var(--text-primary);
+}
+
+/* Light Theme Override - Applied to HTML tag */
+html.light-mode {
+  --bg-primary: #ffffff !important;
+  --bg-secondary: #f1f5f9 !important;
+  /* slate-100 */
+  --bg-tertiary: #e2e8f0 !important;
+  /* slate-200 */
+
+  --text-primary: #0f172a !important;
+  /* slate-900 */
+  --text-secondary: #64748b !important;
+  /* slate-500 */
+
+  --border: #e2e8f0 !important;
+  /* slate-200 */
+}
+
+/* CodeNow Theme - Custom Branding */
+html.theme-codenow {
+  --bg-primary: #f8fafc !important; /* Very light gray/white */
+  --bg-secondary: #ffffff !important; /* Pure white containers */
+  --bg-tertiary: #f1f5f9 !important; /* Light accent background */
+
+  --text-primary: #1e293b !important; /* Slate 800 */
+  --text-secondary: #64748b !important; /* Slate 500 */
+
+  --border: #e2e8f0 !important;
+
+  /* Force Green Accent for CodeNow */
+  --accent: #22c55e !important;
+  --accent-hover: #16a34a !important;
+  --accent-light: rgba(34, 197, 94, 0.15) !important;
+}
+
+/* Accent Color Overrides */
+.accent-blue {
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-light: rgba(59, 130, 246, 0.2);
+}
+
+.accent-purple {
+  --accent: #a855f7;
+  --accent-hover: #9333ea;
+  --accent-light: rgba(168, 85, 247, 0.2);
+}
+
+.accent-green {
+  --accent: #22c55e;
+  --accent-hover: #16a34a;
+  --accent-light: rgba(34, 197, 94, 0.2);
+}
+
+.accent-orange {
+  --accent: #f97316;
+  --accent-hover: #ea580c;
+  --accent-light: rgba(249, 115, 22, 0.2);
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.3s, color 0.3s;
+  min-height: 100vh;
+}
+
+/* Reusable Utility Classes based on variables */
+.bg-theme-main {
+  background-color: var(--bg-primary);
+}
+
+.bg-theme-secondary {
+  background-color: var(--bg-secondary);
+}
+
+.bg-theme-tertiary {
+  background-color: var(--bg-tertiary);
+}
+
+.text-theme-primary {
+  color: var(--text-primary);
+}
+
+.text-theme-secondary {
+  color: var(--text-secondary);
+}
+
+.border-theme {
+  border-color: var(--border);
+}
+
+.bg-accent {
+  background-color: var(--accent);
+}
+
+.text-accent {
+  color: var(--accent);
+}
+
+/* Custom range input styling */
+input[type="range"]::-webkit-slider-thumb {
+  pointer-events: all;
+  width: 16px;
+  height: 16px;
+  -webkit-appearance: none;
+  background: var(--accent);
+  border-radius: 50%;
+  border: 2px solid var(--bg-primary);
+  cursor: pointer;
+}
+
+.current-line-highlight {
+  background-color: var(--accent-light);
+  border-left: 2px solid var(--accent);
+}
+
+.condition-pass-highlight {
+  background-color: rgba(34, 197, 94, 0.2); /* Green-500 @ 20% */
+  border-left: 2px solid #22c55e;
+}
+
+.condition-fail-highlight {
+  background-color: rgba(239, 68, 68, 0.2); /* Red-500 @ 20% */
+  border-left: 2px solid #ef4444;
+}
+
+@keyframes gradient-x {
+  0%, 100% {
+    background-size: 200% 200%;
+    background-position: left center;
+  }
+  50% {
+    background-size: 200% 200%;
+    background-position: right center;
+  }
+}
+
+.animate-gradient-x {
+  animation: gradient-x 8s ease infinite;
+}
+
+@keyframes bounce-slow {
+  0%, 100% {
+    transform: translateY(-5%);
+    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+  }
+  50% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+.animate-bounce-slow {
+  animation: bounce-slow 4s infinite;
+}
+
+.animate-bounce-slow-delayed {
+  animation: bounce-slow 4s infinite;
+  animation-delay: 1s;
+}
