@@ -62,7 +62,7 @@ export function useExecution(language: string, code: string, DEFAULT_TS_CODE: st
         // Helper: wait for backend to wake up, then execute once
         const runWithWarmup = async (): Promise<Response> => {
           const MAX_WAIT_MS = 120000; // 2 minutes max
-          const PING_INTERVAL = 8000; // ping every 8 seconds
+          const PING_INTERVAL = 15000; // ping every 15 seconds — avoid rate limiting
           const startTime = Date.now();
 
           // First attempt — if it works, great
