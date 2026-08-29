@@ -1,4 +1,4 @@
-# Code Visualizer — Professional Architecture
+ # Code Visualizer — Professional Architecture
 
 A high-performance interactive code execution visualizer for TypeScript, Python, Java, C, and C++.
 
